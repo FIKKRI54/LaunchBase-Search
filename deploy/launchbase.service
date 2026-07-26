@@ -1,0 +1,27 @@
+[Unit]
+Description=LaunchBase Search API
+After=network.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=launchbase
+Group=launchbase
+WorkingDirectory=/opt/launchbase
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+EnvironmentFile=/opt/launchbase/.env
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/launchbase
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,36 @@
+INSERT INTO business_benchmarks
+  (slug, name, google_place_type, per_capita_spend_rm, average_store_sales_rm, income_elasticity, capture_rate, estimated_stores_per_100k, osm_tags, classifier_types, assumptions)
+VALUES
+  ('specialty_coffee', 'Specialty coffee shop', 'cafe', 180, 540000, 0.65, 0.35, 10, '["amenity=cafe"]', '["cafe"]', '{"note":"Starter financial assumption; supply is classified from live mapped businesses."}'),
+  ('ice_cream', 'Ice cream shop', 'ice_cream_shop', 65, 400000, 0.50, 0.32, 3, '["shop=ice_cream","cuisine=ice_cream"]', '["ice_cream"]', '{"note":"Starter financial assumption inspired by per-capita demand modelling."}'),
+  ('boutique_fitness', 'Boutique fitness studio', 'fitness_center', 140, 720000, 0.85, 0.28, 4, '["leisure=fitness_centre"]', '["boutique_fitness"]', '{"note":"Starter financial assumption; demand is weighted by income."}'),
+  ('coworking', 'Flexible coworking hub', 'coworking_space', 90, 650000, 0.90, 0.24, 1.5, '["office=coworking"]', '["coworking"]', '{"note":"Starter financial assumption; location fit should later include employment density."}'),
+  ('healthy_food', 'Healthy / vegetarian restaurant', 'restaurant', 150, 600000, 0.70, 0.25, 2, '["amenity=restaurant","amenity=fast_food"]', '["healthy_food"]', '{"note":"Starter financial assumption; names and cuisine tags determine this niche."}'),
+  ('bakery', 'Neighbourhood bakery', 'bakery', 140, 480000, 0.55, 0.35, 7, '["shop=bakery"]', '["bakery"]', '{"note":"Starter financial assumption; validate local purchase frequency."}'),
+  ('pharmacy', 'Community pharmacy', 'pharmacy', 250, 1200000, 0.25, 0.35, 5, '["amenity=pharmacy"]', '["pharmacy"]', '{"note":"Starter financial assumption; licensing and healthcare rules apply."}'),
+  ('convenience', 'Convenience store', 'convenience_store', 600, 1800000, 0.35, 0.30, 12, '["shop=convenience"]', '["convenience"]', '{"note":"Starter financial assumption; validate basket size and rent."}'),
+  ('laundry', 'Self-service laundry', 'laundry', 100, 360000, 0.35, 0.45, 6, '["shop=laundry"]', '["laundry"]', '{"note":"Starter financial assumption; housing mix strongly affects demand."}'),
+  ('beauty', 'Beauty and hair studio', 'beauty_salon', 160, 420000, 0.70, 0.35, 8, '["shop=beauty","shop=hairdresser"]', '["beauty"]', '{"note":"Starter financial assumption; service positioning affects achievable sales."}'),
+  ('nasi_kandar', 'Nasi kandar restaurant', 'restaurant', 180, 650000, 0.40, 0.30, 3, '["amenity=restaurant","amenity=fast_food"]', '["nasi_kandar"]', '{"note":"Starter financial assumption; niche is detected from cuisine and business-name indicators."}'),
+  ('nasi_lemak', 'Nasi lemak restaurant', 'restaurant', 150, 500000, 0.35, 0.30, 4, '["amenity=restaurant","amenity=fast_food"]', '["nasi_lemak"]', '{"note":"Starter financial assumption; niche is detected from cuisine and business-name indicators."}'),
+  ('mamak', 'Mamak restaurant', 'restaurant', 200, 850000, 0.40, 0.32, 4, '["amenity=restaurant","amenity=fast_food"]', '["mamak"]', '{"note":"Starter financial assumption; niche is detected from cuisine and business-name indicators."}'),
+  ('kopitiam', 'Kopitiam', 'cafe', 180, 650000, 0.50, 0.35, 5, '["amenity=cafe","amenity=restaurant"]', '["kopitiam"]', '{"note":"Starter financial assumption; niche is detected from cuisine and business-name indicators."}'),
+  ('malay_restaurant', 'Malay restaurant', 'restaurant', 220, 700000, 0.40, 0.25, 8, '["amenity=restaurant","amenity=fast_food"]', '["malay_restaurant"]', '{"note":"Starter financial assumption; niche is detected from cuisine tags."}'),
+  ('indian_restaurant', 'Indian restaurant', 'restaurant', 180, 700000, 0.45, 0.25, 3, '["amenity=restaurant","amenity=fast_food"]', '["indian_restaurant"]', '{"note":"Starter financial assumption; niche is detected from cuisine and business-name indicators."}'),
+  ('chinese_restaurant', 'Chinese restaurant', 'restaurant', 220, 800000, 0.55, 0.25, 5, '["amenity=restaurant","amenity=fast_food"]', '["chinese_restaurant"]', '{"note":"Starter financial assumption; niche is detected from cuisine tags."}'),
+  ('thai_restaurant', 'Thai / tom yam restaurant', 'restaurant', 160, 650000, 0.50, 0.25, 2, '["amenity=restaurant","amenity=fast_food"]', '["thai_restaurant"]', '{"note":"Starter financial assumption; niche is detected from cuisine and business-name indicators."}'),
+  ('seafood_restaurant', 'Seafood restaurant', 'restaurant', 180, 900000, 0.60, 0.22, 3, '["amenity=restaurant","amenity=fast_food"]', '["seafood_restaurant"]', '{"note":"Starter financial assumption; niche is detected from cuisine and business-name indicators."}'),
+  ('western_restaurant', 'Western / grill restaurant', 'restaurant', 180, 750000, 0.70, 0.22, 4, '["amenity=restaurant","amenity=fast_food"]', '["western_restaurant"]', '{"note":"Starter financial assumption; niche is detected from cuisine and business-name indicators."}'),
+  ('burger_shop', 'Burger shop', 'fast_food', 120, 450000, 0.45, 0.30, 6, '["amenity=fast_food","amenity=restaurant"]', '["burger_shop"]', '{"note":"Starter financial assumption; niche is detected from cuisine and business-name indicators."}')
+ON CONFLICT (slug) DO UPDATE SET
+  name = EXCLUDED.name,
+  google_place_type = EXCLUDED.google_place_type,
+  per_capita_spend_rm = EXCLUDED.per_capita_spend_rm,
+  average_store_sales_rm = EXCLUDED.average_store_sales_rm,
+  income_elasticity = EXCLUDED.income_elasticity,
+  capture_rate = EXCLUDED.capture_rate,
+  estimated_stores_per_100k = EXCLUDED.estimated_stores_per_100k,
+  osm_tags = EXCLUDED.osm_tags,
+  classifier_types = EXCLUDED.classifier_types,
+  assumptions = EXCLUDED.assumptions,
+  updated_at = NOW();
