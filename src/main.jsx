@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import launchbaseLogo from './assets/launchbase-logo-web.png'
+import launchbaseLogo from './assets/launchbase-logo-rocket.png'
+import launchbaseHeaderVideo from './assets/launchbase-header-logo.mp4'
 import marketStreetImage from './assets/malaysia-market-street.jpg'
 import {
   businessTypeLabel,
@@ -18,6 +19,86 @@ import './styles.css'
 
 const Icon = ({ icon, width = 20, className = '' }) =>
   React.createElement('iconify-icon', { icon, width, class: className })
+
+const HEADER_LOGO_SEEN_KEY = 'launchbase-header-logo-seen-v1'
+const HEADER_LOGO_FRAME_KEY = 'launchbase-header-logo-final-frame-v1'
+
+function AnimatedHeaderLogo() {
+  const reducedMotion = useRef(window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [fallback, setFallback] = useState(reducedMotion.current)
+  const [savedFrame] = useState(() => {
+    try {
+      return localStorage.getItem(HEADER_LOGO_FRAME_KEY) || ''
+    } catch {
+      return ''
+    }
+  })
+  const [animate] = useState(() => {
+    if (reducedMotion.current) return false
+    try {
+      const forceReplay = new URLSearchParams(window.location.search).get('logo') === 'replay'
+      return forceReplay || localStorage.getItem(HEADER_LOGO_SEEN_KEY) !== '1'
+    } catch {
+      return true
+    }
+  })
+
+  useEffect(() => {
+    if (!animate) return
+    try {
+      localStorage.setItem(HEADER_LOGO_SEEN_KEY, '1')
+    } catch {
+      // The animated logo still works when storage is unavailable.
+    }
+  }, [animate])
+
+  const captureFinalFrame = (video) => {
+    if (!video.videoWidth || !video.videoHeight) return
+    const canvas = document.createElement('canvas')
+    const size = 128
+    const sourceSize = Math.min(video.videoWidth, video.videoHeight)
+    canvas.width = size
+    canvas.height = size
+    const context = canvas.getContext('2d')
+    if (!context) return
+    context.drawImage(
+      video,
+      (video.videoWidth - sourceSize) / 2,
+      (video.videoHeight - sourceSize) / 2,
+      sourceSize,
+      sourceSize,
+      0,
+      0,
+      size,
+      size,
+    )
+    try {
+      localStorage.setItem(HEADER_LOGO_FRAME_KEY, canvas.toDataURL('image/webp', .88))
+    } catch {
+      // The video remains frozen on its final frame for the current visit.
+    }
+  }
+
+  if (!animate || fallback) {
+    return <img src={savedFrame || launchbaseLogo} alt="" className="brand-logo-image" />
+  }
+
+  return (
+    <video
+      className="brand-logo-video"
+      src={launchbaseHeaderVideo}
+      poster={savedFrame || launchbaseLogo}
+      autoPlay
+      muted
+      playsInline
+      preload="auto"
+      aria-hidden="true"
+      onEnded={(event) => captureFinalFrame(event.currentTarget)}
+      onError={() => setFallback(true)}
+      onCanPlay={(event) => event.currentTarget.play().catch(() => setFallback(true))}
+    />
+  )
+}
 
 function AnimatedDataField({ theme }) {
   const canvasRef = useRef(null)
@@ -150,7 +231,7 @@ function Header({ openAuth, theme, toggleTheme, locale, toggleLocale }) {
       <nav className="mx-auto flex h-20 max-w-[1240px] items-center justify-between px-5 lg:px-8" aria-label={t('mainNavigation')}>
         <a href="#" className="group flex items-center gap-2.5" aria-label="LaunchBase Search home">
           <span className="brand-logo-shell grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-foreground/10 transition-transform group-hover:-rotate-3">
-            <img src={launchbaseLogo} alt="" className="h-9 w-9 object-contain" />
+            <AnimatedHeaderLogo />
           </span>
           <span className="text-[17px] font-semibold tracking-tight">LaunchBase<span className="text-accent"> Search</span></span>
         </a>
@@ -1339,7 +1420,7 @@ function Footer({ locale }) {
   return (
     <footer className="border-t border-foreground/10">
       <div className="mx-auto grid max-w-[1240px] gap-12 px-5 py-14 md:grid-cols-2 lg:px-8">
-        <div><a href="#" className="flex items-center gap-2.5 font-semibold"><span className="brand-logo-shell grid h-9 w-9 place-items-center rounded-lg border border-foreground/10"><img src={launchbaseLogo} alt="" className="h-7 w-7 object-contain" /></span>LaunchBase Search</a><p className="mt-5 max-w-sm text-sm leading-6 text-foreground/65">{t('footerCopy')}</p></div>
+        <div><a href="#" className="flex items-center gap-2.5 font-semibold"><span className="brand-logo-shell grid h-9 w-9 place-items-center rounded-lg border border-foreground/10"><img src={launchbaseLogo} alt="" className="h-8 w-8 object-contain" /></span>LaunchBase Search</a><p className="mt-5 max-w-sm text-sm leading-6 text-foreground/65">{t('footerCopy')}</p></div>
         <div className="grid grid-cols-2 gap-8 text-sm md:justify-self-end md:text-right">
           <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('product')}</p><a className="block hover:text-accent" href="#how">{t('navHow')}</a><a className="block hover:text-accent" href="#free-access">{t('freeAccess')}</a><a className="block hover:text-accent" href="#data">{t('navData')}</a></div>
           <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('company')}</p><a className="block hover:text-accent" href="#">{t('privacy')}</a><a className="block hover:text-accent" href="#">{t('terms')}</a><a className="block hover:text-accent" href="mailto:hello@launchbase.my">{t('contact')}</a></div>
