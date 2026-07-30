@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import launchbaseLogo from './assets/launchbase-logo-rocket.png'
-import launchbaseHeaderVideo from './assets/launchbase-header-logo.mp4'
-import marketStreetImage from './assets/malaysia-market-street.jpg'
+import launchbaseHeaderVideo from './assets/launchbase-header-logo.webm'
+import launchbaseHeaderHdLogo from './assets/launchbase-header-logo-hd-clean.png'
 import {
   businessTypeLabel,
   localizedMethodology,
@@ -20,24 +20,21 @@ import './styles.css'
 const Icon = ({ icon, width = 20, className = '' }) =>
   React.createElement('iconify-icon', { icon, width, class: className })
 
-const HEADER_LOGO_SEEN_KEY = 'launchbase-header-logo-seen-v1'
-const HEADER_LOGO_FRAME_KEY = 'launchbase-header-logo-final-frame-v1'
+const HEADER_LOGO_SEEN_KEY = 'launchbase-header-logo-seen-session-v6'
+const CONTACT_EMAIL = import.meta.env.VITE_CONTACT_EMAIL?.trim() || 'hello@launchbase.my'
 
 function AnimatedHeaderLogo() {
   const reducedMotion = useRef(window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const playbackStarted = useRef(false)
   const [fallback, setFallback] = useState(reducedMotion.current)
-  const [savedFrame] = useState(() => {
-    try {
-      return localStorage.getItem(HEADER_LOGO_FRAME_KEY) || ''
-    } catch {
-      return ''
-    }
-  })
+  const [videoReady, setVideoReady] = useState(false)
+  const [videoEnded, setVideoEnded] = useState(false)
+  const [hdLogoReady, setHdLogoReady] = useState(false)
   const [animate] = useState(() => {
     if (reducedMotion.current) return false
     try {
       const forceReplay = new URLSearchParams(window.location.search).get('logo') === 'replay'
-      return forceReplay || localStorage.getItem(HEADER_LOGO_SEEN_KEY) !== '1'
+      return forceReplay || sessionStorage.getItem(HEADER_LOGO_SEEN_KEY) !== '1'
     } catch {
       return true
     }
@@ -46,57 +43,63 @@ function AnimatedHeaderLogo() {
   useEffect(() => {
     if (!animate) return
     try {
-      localStorage.setItem(HEADER_LOGO_SEEN_KEY, '1')
+      sessionStorage.setItem(HEADER_LOGO_SEEN_KEY, '1')
     } catch {
       // The animated logo still works when storage is unavailable.
     }
   }, [animate])
 
-  const captureFinalFrame = (video) => {
-    if (!video.videoWidth || !video.videoHeight) return
-    const canvas = document.createElement('canvas')
-    const size = 128
-    const sourceSize = Math.min(video.videoWidth, video.videoHeight)
-    canvas.width = size
-    canvas.height = size
-    const context = canvas.getContext('2d')
-    if (!context) return
-    context.drawImage(
-      video,
-      (video.videoWidth - sourceSize) / 2,
-      (video.videoHeight - sourceSize) / 2,
-      sourceSize,
-      sourceSize,
-      0,
-      0,
-      size,
-      size,
-    )
-    try {
-      localStorage.setItem(HEADER_LOGO_FRAME_KEY, canvas.toDataURL('image/webp', .88))
-    } catch {
-      // The video remains frozen on its final frame for the current visit.
-    }
+  const startFromFirstFrame = (video) => {
+    if (playbackStarted.current) return
+    playbackStarted.current = true
+    video.pause()
+    video.currentTime = 0
+    setVideoReady(true)
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        video.play().catch(() => setFallback(true))
+      })
+    })
   }
 
   if (!animate || fallback) {
-    return <img src={savedFrame || launchbaseLogo} alt="" className="brand-logo-image" />
+    return (
+      <span className="brand-logo-stage brand-logo-stage-finished">
+        <img
+          src={launchbaseHeaderHdLogo}
+          alt=""
+          className="brand-logo-image brand-logo-resting"
+          loading="eager"
+          decoding="async"
+          fetchPriority="high"
+        />
+      </span>
+    )
   }
 
   return (
-    <video
-      className="brand-logo-video"
-      src={launchbaseHeaderVideo}
-      poster={savedFrame || launchbaseLogo}
-      autoPlay
-      muted
-      playsInline
-      preload="auto"
-      aria-hidden="true"
-      onEnded={(event) => captureFinalFrame(event.currentTarget)}
-      onError={() => setFallback(true)}
-      onCanPlay={(event) => event.currentTarget.play().catch(() => setFallback(true))}
-    />
+    <span className={`brand-logo-stage ${videoEnded && hdLogoReady ? 'brand-logo-stage-finished' : ''}`}>
+      <img
+        src={launchbaseHeaderHdLogo}
+        alt=""
+        className="brand-logo-image brand-logo-resting"
+        loading="eager"
+        decoding="async"
+        fetchPriority="high"
+        onLoad={() => setHdLogoReady(true)}
+      />
+      <video
+        className={`brand-logo-video ${videoReady ? 'brand-logo-video-ready' : ''}`}
+        src={launchbaseHeaderVideo}
+        muted
+        playsInline
+        preload="auto"
+        aria-hidden="true"
+        onEnded={() => setVideoEnded(true)}
+        onError={() => setFallback(true)}
+        onLoadedData={(event) => startFromFirstFrame(event.currentTarget)}
+      />
+    </span>
   )
 }
 
@@ -223,37 +226,58 @@ function ThemeToggle({ theme, toggle, mobile = false, locale }) {
 
 function Header({ openAuth, theme, toggleTheme, locale, toggleLocale }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [scrolled, setScrolled] = useState(() => window.scrollY > 48)
+
+  useEffect(() => {
+    let frameId = 0
+    const updateHeader = () => {
+      if (frameId) return
+      frameId = window.requestAnimationFrame(() => {
+        setScrolled((wasScrolled) => (
+          wasScrolled ? window.scrollY > 24 : window.scrollY > 72
+        ))
+        frameId = 0
+      })
+    }
+    updateHeader()
+    window.addEventListener('scroll', updateHeader, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', updateHeader)
+      if (frameId) window.cancelAnimationFrame(frameId)
+    }
+  }, [])
   const t = translator(locale)
-  const links = [[t('navHow'), 'how'], [t('navData'), 'data'], [t('navOpportunities'), 'opportunities'], [t('navFree'), 'free-access']]
+  const links = [[t('navHow'), 'how'], [t('navData'), 'data'], [t('navOpportunities'), 'opportunities'], [t('contact'), 'contact']]
 
   return (
-    <header className="sticky top-0 z-50 border-b border-foreground/10 bg-ink/85 backdrop-blur-xl">
-      <nav className="mx-auto flex h-20 max-w-[1240px] items-center justify-between px-5 lg:px-8" aria-label={t('mainNavigation')}>
-        <a href="#" className="group flex items-center gap-2.5" aria-label="LaunchBase Search home">
-          <span className="brand-logo-shell grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-foreground/10 transition-transform group-hover:-rotate-3">
-            <AnimatedHeaderLogo />
-          </span>
+    <header className={`site-header ${scrolled ? 'is-scrolled' : 'is-top'} ${menuOpen ? 'menu-open' : ''} sticky top-0 z-50 border-b border-foreground/10`}>
+      <nav className="site-nav-shell mx-auto flex h-20 max-w-[1240px] items-center justify-between px-5 lg:px-8" aria-label={t('mainNavigation')}>
+        <a href="#" className="site-brand group flex items-center gap-0" aria-label="LaunchBase Search home">
+          <AnimatedHeaderLogo />
+
           <span className="text-[17px] font-semibold tracking-tight">LaunchBase<span className="text-accent"> Search</span></span>
         </a>
-        <div className="hidden items-center gap-8 text-sm text-foreground/65 lg:flex">
-          {links.map(([label, anchor]) => <a key={anchor} href={`#${anchor}`} className="transition hover:text-accent">{label}</a>)}
+        <div className="site-nav-cluster hidden items-center gap-7 xl:flex">
+          <div className="flex items-center gap-7 text-sm text-foreground/65">
+            {links.map(([label, anchor]) => <a key={anchor} href={`#${anchor}`} className="transition hover:text-accent">{label}</a>)}
+          </div>
+          <div className="site-nav-actions flex items-center gap-3">
+            <button type="button" onClick={toggleLocale} className="grid h-10 min-w-10 place-items-center rounded-xl border border-foreground/15 bg-surface px-3 text-xs font-bold text-foreground/75 transition hover:border-accent hover:text-accent" aria-label={t('languageLabel')}>{t('language')}</button>
+            <ThemeToggle theme={theme} toggle={toggleTheme} locale={locale} />
+            <button onClick={() => openAuth('login')} className="rounded-lg px-4 py-2.5 text-sm font-medium text-foreground/75 transition hover:text-accent">{t('login')}</button>
+            <a href="#search" className="button-primary">{t('startScan')}</a>
+          </div>
         </div>
-        <div className="hidden items-center gap-3 sm:flex">
-          <button type="button" onClick={toggleLocale} className="grid h-10 min-w-10 place-items-center rounded-xl border border-foreground/15 bg-surface px-3 text-xs font-bold text-foreground/75 transition hover:border-accent hover:text-accent" aria-label={t('languageLabel')}>{t('language')}</button>
-          <ThemeToggle theme={theme} toggle={toggleTheme} locale={locale} />
-          <button onClick={() => openAuth('login')} className="rounded-lg px-4 py-2.5 text-sm font-medium text-foreground/75 transition hover:text-accent">{t('login')}</button>
-          <a href="#search" className="button-primary">{t('startScan')}</a>
-        </div>
-        <button onClick={() => setMenuOpen(!menuOpen)} className="grid h-10 w-10 place-items-center rounded-lg border border-foreground/15 lg:hidden" aria-label={t('openMenu')} aria-expanded={menuOpen}>
+        <button onClick={() => setMenuOpen(!menuOpen)} className="site-menu-trigger grid h-10 w-10 place-items-center rounded-lg border border-foreground/15 xl:hidden" aria-label={t('openMenu')} aria-expanded={menuOpen}>
           <Icon icon={menuOpen ? 'solar:close-circle-linear' : 'solar:hamburger-menu-linear'} width={24} />
         </button>
       </nav>
       {menuOpen && (
-        <div className="border-t border-foreground/10 bg-ink px-5 py-5 lg:hidden">
+        <div className="site-mobile-menu border-t border-foreground/10 bg-ink px-5 py-5 xl:hidden">
           <div className="flex flex-col gap-4 text-sm text-foreground/75">
             {links.map(([label, anchor]) => <a key={anchor} onClick={() => setMenuOpen(false)} href={`#${anchor}`}>{label}</a>)}
             <button type="button" onClick={toggleLocale} className="flex h-10 items-center justify-between rounded-xl border border-foreground/15 px-4"><span>{locale === 'ms' ? 'Bahasa Melayu' : 'English'}</span><strong>{t('language')}</strong></button>
-            <div className="sm:hidden"><ThemeToggle theme={theme} toggle={toggleTheme} mobile locale={locale} /></div>
+            <div><ThemeToggle theme={theme} toggle={toggleTheme} mobile locale={locale} /></div>
             <button onClick={() => openAuth('login')} className="text-left">{t('login')}</button>
             <a onClick={() => setMenuOpen(false)} href="#search" className="mt-2 rounded-lg bg-signal px-5 py-3 text-center font-semibold text-contrast">{t('startScan')}</a>
           </div>
@@ -298,6 +322,7 @@ function Hero({ onSearch, theme, locale }) {
             <span className="flex items-center gap-1.5"><Icon icon="solar:shield-check-linear" width={16} />{t('noLogin')}</span>
             <span className="flex items-center gap-1.5"><Icon icon="solar:hand-money-linear" width={16} />{t('adSupported')}</span>
             <span className="flex items-center gap-1.5"><Icon icon="solar:refresh-circle-linear" width={16} />{t('freshInsights')}</span>
+            <span className="flex items-center gap-1.5"><Icon icon="solar:map-point-wave-linear" width={16} />{t('malaysiaOnly')}</span>
           </div>
         </div>
       </div>
@@ -514,8 +539,8 @@ function LeafletMarketMap({ analysis, selectedCategory, draftPoint, previewRadiu
     areaLayerRef.current?.remove()
     const radiusCircle = L.circle(center, {
       radius: previewRadius * 1000,
-      color: '#d8a900',
-      fillColor: '#f9d022',
+      color: '#9f102d',
+      fillColor: '#e0173b',
       fillOpacity: 0.055,
       weight: 2,
       dashArray: '7 7',
@@ -548,9 +573,10 @@ function LeafletMarketMap({ analysis, selectedCategory, draftPoint, previewRadiu
     const map = mapRef.current
     if (!map) return
     businessLayerRef.current?.remove()
-    const marketTypes = selectedCategory === 'all'
+    const selectedOpportunity = analysis.opportunities.find((item) => item.slug === selectedCategory)
+    const marketTypes = selectedCategory === 'all' || !selectedOpportunity
       ? null
-      : analysis.opportunities.find((item) => item.slug === selectedCategory)?.marketTypes || []
+      : selectedOpportunity.marketTypes || []
     const visiblePlaces = (analysis.mapBusinesses || [])
       .filter((place) => !marketTypes || marketTypes.includes(place.type))
       .slice(0, selectedCategory === 'all' ? 350 : 500)
@@ -565,7 +591,7 @@ function LeafletMarketMap({ analysis, selectedCategory, draftPoint, previewRadiu
       return L.circleMarker([place.lat, place.lng], {
         radius: 5,
         color: '#151719',
-        fillColor: place.confidence === 'high' ? '#f9d022' : '#d6a900',
+        fillColor: place.confidence === 'high' ? '#e0173b' : '#9f102d',
         fillOpacity: 0.92,
         weight: 1.5,
       }).bindPopup(content)
@@ -644,15 +670,17 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
   useEffect(() => {
     setSearchQuery(analysis.location.formattedAddress || analysis.location.name)
     setRadiusKm(analysis.radiusKm)
+    setSelectedCategory('all')
     setDraftPoint(null)
   }, [analysis.generatedAt])
 
   const submitSearch = (event) => {
     event.preventDefault()
-    if (searchQuery.trim()) onScan({ query: searchQuery.trim(), radiusKm: Number(radiusKm) })
-  }
-  const scanPoint = () => {
-    if (draftPoint) onScan({ ...draftPoint, radiusKm: Number(radiusKm) })
+    if (draftPoint) {
+      onScan({ ...draftPoint, radiusKm: Number(radiusKm) })
+    } else if (searchQuery.trim()) {
+      onScan({ query: searchQuery.trim(), radiusKm: Number(radiusKm) })
+    }
   }
 
   return (
@@ -676,7 +704,10 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
           <Icon icon="solar:magnifer-linear" width={17} className="text-foreground/50" />
           <input
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
+            onChange={(event) => {
+              setSearchQuery(event.target.value)
+              setDraftPoint(null)
+            }}
             className="h-10 min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none"
             aria-label="Search another Malaysian location"
             placeholder={t('searchPlace')}
@@ -693,7 +724,7 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
           />
         </div>
         <button disabled={loading} className="rounded-xl bg-signal px-4 py-2 text-xs font-semibold text-contrast disabled:cursor-wait disabled:opacity-60">
-          {loading ? t('scanning') : t('searchScan')}
+          {loading ? t('scanning') : draftPoint ? t('scanPoint') : t('searchScan')}
         </button>
       </form>
       {mode === 'market' && (
@@ -720,20 +751,6 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
             previewRadiusKm={radiusKm}
             onPointChange={setDraftPoint}
           />
-          {draftPoint && (
-            <div className="flex flex-col gap-3 border-t border-emerald-500/20 bg-emerald-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs font-medium text-emerald-600">{t('pointSelected')}</p>
-                <p className="mt-0.5 text-[11px] text-foreground/50">{draftPoint.lat.toFixed(5)}, {draftPoint.lng.toFixed(5)} · {radiusKm} km radius</p>
-              </div>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setDraftPoint(null)} className="rounded-lg px-3 py-2 text-xs text-foreground/60 hover:text-foreground">{t('cancel')}</button>
-                <button type="button" disabled={loading} onClick={scanPoint} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">
-                  {loading ? t('scanning') : t('scanPoint')}
-                </button>
-              </div>
-            </div>
-          )}
         </>
       )}
       {mode !== 'market' && <GoogleEmbedView analysis={analysis} mode={mode} locale={locale} />}
@@ -887,7 +904,7 @@ function AnalysisWorkspace({ analysis, loading, error, onScan, locale }) {
                   analysis.dataQuality.marketEvidence.level === 'high'
                     ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600'
                     : analysis.dataQuality.marketEvidence.level === 'medium'
-                      ? 'border-amber-500/25 bg-amber-500/10 text-amber-600'
+                      ? 'border-signal/25 bg-signal/10 text-accent'
                       : 'border-orange-500/25 bg-orange-500/10 text-orange-600'
                 }`}>
                   <Icon icon="solar:verified-check-bold" width={16} />
@@ -937,7 +954,7 @@ function AnalysisWorkspace({ analysis, loading, error, onScan, locale }) {
                     <p className="mt-1 text-xs leading-5 text-foreground/60">{t('zeroWarning')}</p>
                   </div>
                 </div>
-                <button type="button" disabled={loading} onClick={() => onScan({ query: analysis.location.formattedAddress || analysis.location.name, radiusKm: analysis.radiusKm })} className="shrink-0 rounded-xl border border-orange-500/30 px-4 py-2 text-xs font-semibold text-orange-600 transition hover:bg-orange-500/10 disabled:opacity-60">
+                <button type="button" disabled={loading} onClick={() => onScan({ query: analysis.location.formattedAddress || analysis.location.name, radiusKm: analysis.radiusKm, refresh: true })} className="shrink-0 rounded-xl border border-orange-500/30 px-4 py-2 text-xs font-semibold text-orange-600 transition hover:bg-orange-500/10 disabled:opacity-60">
                   {t('retry')}
                 </button>
               </div>
@@ -1321,6 +1338,88 @@ const opportunityIcons = {
   beauty: 'solar:scissors-square-linear',
 }
 
+function MarketSignalBanner({ analysis, primary, locale }) {
+  const t = translator(locale)
+  const hasResult = Boolean(analysis && primary)
+  const location = analysis?.location?.name || t('signalWaitingArea')
+  const population = analysis?.area?.population
+    ? formatNumber.format(analysis.area.population)
+    : '—'
+  const mappedBusinesses = analysis?.dataQuality?.supplyAvailable
+    ? formatNumber.format(analysis.dataQuality.mappedBusinesses || 0)
+    : '—'
+  const recommendation = primary ? opportunityName(primary, locale) : t('signalAwaiting')
+
+  return (
+    <aside className="market-signal-banner mt-12" aria-label={t('signalBannerLabel')}>
+      <div className="market-signal-copy">
+        <span className="inline-flex w-fit items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+          {hasResult ? t('signalLive') : t('signalPreview')}
+        </span>
+        <h3 className="mt-5 max-w-lg text-3xl font-semibold leading-[1.08] tracking-[-.04em] md:text-4xl">{t('signalBannerTitle')}</h3>
+        <p className="mt-4 max-w-lg text-sm leading-6 text-foreground/65 md:text-base md:leading-7">{t('signalBannerCopy')}</p>
+        <a href={hasResult ? '#analysis' : '#search'} className="group mt-7 inline-flex items-center gap-2 text-sm font-semibold text-accent">
+          {hasResult ? t('signalBannerCtaLive') : t('signalBannerCtaEmpty')}
+          <Icon icon="solar:arrow-right-linear" className="transition-transform duration-300 group-hover:translate-x-1" />
+        </a>
+      </div>
+
+      <div className="market-signal-visual" aria-live="polite">
+        <div className="market-signal-grid" aria-hidden="true" />
+        <div className="market-signal-sweep" aria-hidden="true" />
+        <div className="market-signal-flow">
+          <div className="market-signal-progress" aria-hidden="true" />
+
+          <article className="market-signal-card market-signal-card-one">
+            <div className="market-signal-icon"><Icon icon="solar:map-point-linear" width={21} /></div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-foreground/45">{t('signalSelectedArea')}</p>
+              <p className="mt-2 truncate text-sm font-semibold">{location}</p>
+            </div>
+            <span className="market-signal-ring" aria-hidden="true" />
+          </article>
+
+          <div className="market-signal-pair">
+            <article className="market-signal-card market-signal-card-two">
+              <div className="market-signal-icon"><Icon icon="solar:users-group-rounded-linear" width={21} /></div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-foreground/45">{t('signalDemand')}</p>
+                <p className="mt-2 text-xl font-semibold tracking-tight">{population}</p>
+                <p className="mt-1 text-[11px] text-foreground/45">{t('signalPopulation')}</p>
+              </div>
+            </article>
+            <article className="market-signal-card market-signal-card-three">
+              <div className="market-signal-icon"><Icon icon="solar:shop-linear" width={21} /></div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-foreground/45">{t('signalSupply')}</p>
+                <p className="mt-2 text-xl font-semibold tracking-tight">{mappedBusinesses}</p>
+                <p className="mt-1 text-[11px] text-foreground/45">{t('signalBusinesses')}</p>
+              </div>
+            </article>
+          </div>
+
+          <article className="market-signal-result">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-white/60">{t('signalRecommendation')}</p>
+                <p className="mt-3 max-w-xs text-xl font-semibold leading-tight text-white">{recommendation}</p>
+              </div>
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/12 text-white">
+                <Icon icon={primary?.icon || 'solar:lightbulb-bolt-linear'} width={25} />
+              </div>
+            </div>
+            <div className="mt-5 flex items-end justify-between border-t border-white/15 pt-4">
+              <span className="text-xs text-white/60">{t('opportunityIndex')}</span>
+              <span className="text-3xl font-semibold text-white">{primary?.successScore ?? '—'}</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
 function OpportunitySection({ analysis, locale }) {
   const t = translator(locale)
   const ideas = (analysis?.opportunities || []).slice(0, 3).map((idea) => ({
@@ -1339,18 +1438,7 @@ function OpportunitySection({ analysis, locale }) {
             ? <a href="#analysis" className="group flex items-center gap-2 text-sm font-medium text-foreground/70 transition hover:text-accent">{t('reviewAnalysis')} <Icon icon="solar:arrow-up-linear" className="transition group-hover:-translate-y-1" /></a>
             : <span className="text-sm text-foreground/60">{t('searchToGenerate')}</span>}
         </div>
-        <figure className="market-story mt-12 overflow-hidden rounded-3xl border border-foreground/10">
-          <img
-            src={marketStreetImage}
-            alt="A Malaysian neighbourhood street with several small-business shopfronts and subtle location markers"
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
-          <figcaption>
-            <p className="text-xs font-semibold uppercase tracking-[.18em] text-signal">{t('fromMapStreet')}</p>
-            <p className="mt-3 max-w-sm text-2xl font-semibold tracking-[-.03em] text-white">{t('marketBehind')}</p>
-          </figcaption>
-        </figure>
+        <MarketSignalBanner analysis={analysis} primary={primary} locale={locale} />
         {!primary ? (
           <div className="mt-14 rounded-2xl border border-dashed border-foreground/15 bg-surface p-10 text-center">
             <Icon icon="solar:map-point-search-linear" width={34} className="text-accent" />
@@ -1389,26 +1477,65 @@ function Metric({ label, value }) {
   return <div><p className="text-xs text-contrast/55">{label}</p><p className="mt-1 text-2xl font-semibold">{value}</p></div>
 }
 
-function FreeAccess({ locale }) {
+function ContactSection({ locale, notify }) {
   const t = translator(locale)
-  const features = [t('completeDemographics'), t('validationChecks'), t('rankedCategories'), t('sensitivityGuidance')]
+
+  const openEmail = (event) => {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const subject = form.get('subject')?.toString().trim()
+    const body = [
+      `${t('contactName')}: ${form.get('name')}`,
+      `${t('email')}: ${form.get('email')}`,
+      '',
+      form.get('message'),
+    ].join('\n')
+
+    window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(`[LaunchBase Search] ${subject}`)}&body=${encodeURIComponent(body)}`
+    notify?.(t('contactOpening'))
+  }
+
   return (
-    <section id="free-access" className="mx-auto max-w-[1240px] px-5 py-24 lg:px-8 lg:py-32">
-      <div className="overflow-hidden rounded-[28px] border border-signal/25 bg-signal">
-        <div className="grid lg:grid-cols-[1.25fr_.75fr]">
-          <div className="p-8 text-contrast md:p-14 lg:p-16">
-            <p className="text-xs font-semibold uppercase tracking-[.2em] text-contrast/60">{t('freeEverySearch')}</p>
-            <h2 className="mt-5 max-w-[650px] text-4xl font-semibold leading-[1.05] tracking-[-.05em] md:text-6xl">{t('freeTitle')}</h2>
-            <p className="mt-6 max-w-xl text-base leading-7 text-contrast/70">{t('freeCopy')}</p>
-            <a href="#search" className="mt-9 inline-flex items-center gap-2 rounded-xl bg-contrast px-6 py-3.5 text-sm font-semibold text-white transition hover:scale-[1.02]">{t('runFree')} <Icon icon="solar:arrow-right-linear" /></a>
+    <section id="contact" className="mx-auto max-w-[1240px] scroll-mt-28 px-5 py-24 lg:px-8 lg:py-32">
+      <div className="overflow-hidden rounded-[28px] border border-foreground/10 bg-surface shadow-[0_24px_80px_rgba(0,0,0,.08)]">
+        <div className="grid lg:grid-cols-[.82fr_1.18fr]">
+          <div className="relative overflow-hidden border-b border-foreground/10 p-8 md:p-12 lg:border-b-0 lg:border-r lg:p-14">
+            <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-accent/10 blur-3xl" aria-hidden="true" />
+            <div className="relative">
+              <p className="eyebrow">{t('contactEyebrow')}</p>
+              <h2 className="mt-5 max-w-md text-4xl font-semibold leading-[1.06] tracking-[-.05em] md:text-5xl">{t('contactTitle')}</h2>
+              <p className="mt-6 max-w-md text-base leading-7 text-foreground/65">{t('contactCopy')}</p>
+              <a href={`mailto:${CONTACT_EMAIL}`} className="mt-9 inline-flex items-center gap-3 rounded-2xl border border-foreground/10 bg-bg px-4 py-3 text-sm font-medium transition hover:border-accent/50 hover:text-accent">
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent/10 text-accent"><Icon icon="solar:letter-linear" width={20} /></span>
+                {CONTACT_EMAIL}
+              </a>
+            </div>
           </div>
-          <div className="border-t border-contrast/15 bg-contrast/[.06] p-8 text-contrast md:p-12 lg:border-l lg:border-t-0">
-            <p className="text-sm font-semibold">{t('includedEvery')}</p>
-            <div className="mt-4 text-5xl font-semibold tracking-tight">{t('freeAccess')}</div>
-            <ul className="mt-8 space-y-4 text-sm text-contrast/75">
-              {features.map((feature) => <li key={feature} className="flex gap-2.5"><Icon icon="solar:check-circle-bold" width={20} />{feature}</li>)}
-            </ul>
-          </div>
+
+          <form onSubmit={openEmail} className="grid gap-5 p-8 md:grid-cols-2 md:p-12 lg:p-14">
+            <label className="block text-sm font-medium">
+              {t('contactName')}
+              <input name="name" required maxLength={80} autoComplete="name" className="form-input mt-2" placeholder={t('contactNamePlaceholder')} />
+            </label>
+            <label className="block text-sm font-medium">
+              {t('email')}
+              <input name="email" required maxLength={200} type="email" autoComplete="email" className="form-input mt-2" placeholder="you@example.com" />
+            </label>
+            <label className="block text-sm font-medium md:col-span-2">
+              {t('contactSubject')}
+              <input name="subject" required maxLength={120} className="form-input mt-2" placeholder={t('contactSubjectPlaceholder')} />
+            </label>
+            <label className="block text-sm font-medium md:col-span-2">
+              {t('contactMessage')}
+              <textarea name="message" required maxLength={2000} rows={6} className="form-input mt-2 min-h-36 resize-y py-3 leading-6" placeholder={t('contactMessagePlaceholder')} />
+            </label>
+            <div className="flex flex-col gap-4 md:col-span-2 md:flex-row md:items-center md:justify-between">
+              <p className="max-w-sm text-xs leading-5 text-foreground/50">{t('contactMailNote')}</p>
+              <button type="submit" className="button-primary shrink-0">
+                {t('contactSend')} <Icon icon="solar:plain-2-linear" width={18} />
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </section>
@@ -1420,10 +1547,10 @@ function Footer({ locale }) {
   return (
     <footer className="border-t border-foreground/10">
       <div className="mx-auto grid max-w-[1240px] gap-12 px-5 py-14 md:grid-cols-2 lg:px-8">
-        <div><a href="#" className="flex items-center gap-2.5 font-semibold"><span className="brand-logo-shell grid h-9 w-9 place-items-center rounded-lg border border-foreground/10"><img src={launchbaseLogo} alt="" className="h-8 w-8 object-contain" /></span>LaunchBase Search</a><p className="mt-5 max-w-sm text-sm leading-6 text-foreground/65">{t('footerCopy')}</p></div>
+        <div><a href="#" className="flex items-center gap-2.5 font-semibold"><img src={launchbaseLogo} alt="" className="h-10 w-10 shrink-0 object-contain" />LaunchBase Search</a><p className="mt-5 max-w-sm text-sm leading-6 text-foreground/65">{t('footerCopy')}</p></div>
         <div className="grid grid-cols-2 gap-8 text-sm md:justify-self-end md:text-right">
-          <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('product')}</p><a className="block hover:text-accent" href="#how">{t('navHow')}</a><a className="block hover:text-accent" href="#free-access">{t('freeAccess')}</a><a className="block hover:text-accent" href="#data">{t('navData')}</a></div>
-          <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('company')}</p><a className="block hover:text-accent" href="#">{t('privacy')}</a><a className="block hover:text-accent" href="#">{t('terms')}</a><a className="block hover:text-accent" href="mailto:hello@launchbase.my">{t('contact')}</a></div>
+          <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('product')}</p><a className="block hover:text-accent" href="#how">{t('navHow')}</a><a className="block hover:text-accent" href="#contact">{t('contact')}</a><a className="block hover:text-accent" href="#data">{t('navData')}</a></div>
+          <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('company')}</p><a className="block hover:text-accent" href="#">{t('privacy')}</a><a className="block hover:text-accent" href="#">{t('terms')}</a><a className="block hover:text-accent" href={`mailto:${CONTACT_EMAIL}`}>{t('contact')}</a></div>
         </div>
       </div>
       <div className="mx-auto flex max-w-[1240px] flex-col gap-2 border-t border-foreground/10 px-5 py-6 text-xs text-foreground/60 sm:flex-row sm:justify-between lg:px-8"><p>{t('footerCopyright')}</p><p>{t('builtFor')}</p></div>
@@ -1476,7 +1603,7 @@ function AuthModal({ mode, close, notify, locale }) {
           <label className="block text-xs text-foreground/60">{t('email')}<input name="email" autoFocus required type="email" className="form-input" placeholder="you@example.com" /></label>
           <label className="block text-xs text-foreground/60">{t('password')}<input name="password" required minLength="8" type="password" className="form-input" placeholder={t('passwordHint')} /></label>
           {formError && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{formError}</p>}
-          <button disabled={submitting} className="h-12 w-full rounded-xl bg-signal text-sm font-semibold text-contrast transition hover:bg-[#ffe05d] disabled:cursor-wait disabled:opacity-60">{submitting ? t('pleaseWait') : t('continue')}</button>
+          <button disabled={submitting} className="h-12 w-full rounded-xl bg-signal text-sm font-semibold text-contrast transition hover:bg-[#ef3b59] disabled:cursor-wait disabled:opacity-60">{submitting ? t('pleaseWait') : t('continue')}</button>
         </form>
         <p className="mt-5 text-center text-xs text-foreground/60">{t('authAgreement')}</p>
       </div>
@@ -1513,7 +1640,7 @@ function App() {
       : selection
     const requestKey = browserAnalysisKey(requestInput)
     const token = localStorage.getItem('launchbase-token')
-    const cachedAnalysis = token ? null : readBrowserAnalysis(requestKey)
+    const cachedAnalysis = token || requestInput.refresh ? null : readBrowserAnalysis(requestKey)
     const requestSequence = scanSequenceRef.current + 1
     scanSequenceRef.current = requestSequence
     scanAbortRef.current?.abort()
@@ -1546,14 +1673,22 @@ function App() {
         signal: controller.signal,
       })
       const body = await response.json()
-      if (!response.ok) throw new Error(body.error || 'Analysis request failed')
+      if (!response.ok) {
+        const requestError = new Error(body.error || 'Analysis request failed')
+        requestError.code = body.code
+        throw requestError
+      }
       if (scanSequenceRef.current !== requestSequence) return
       if (body.dataQuality?.supplyAvailable) storeBrowserAnalysis(requestKey, body)
       setAnalysis(body)
       notify(`${translator(locale)('analysisReady')} ${body.location.name}`)
     } catch (error) {
       if (error.name === 'AbortError' || scanSequenceRef.current !== requestSequence) return
-      setAnalysisError(`${error.message}. ${translator(locale)('runApi')}`)
+      setAnalysisError(
+        error.code === 'MALAYSIA_ONLY'
+          ? translator(locale)('malaysiaOnlyError')
+          : `${error.message}. ${translator(locale)('runApi')}`,
+      )
     } finally {
       if (scanSequenceRef.current === requestSequence) {
         setAnalysisLoading(false)
@@ -1609,7 +1744,7 @@ function App() {
           <AdSenseSlot slot={import.meta.env.VITE_GOOGLE_ADSENSE_SLOT_LANDING} locale={locale} />
         </div>
         <OpportunitySection analysis={analysis} locale={locale} />
-        <FreeAccess locale={locale} />
+        <ContactSection locale={locale} notify={notify} />
       </main>
       <Footer locale={locale} />
       <AuthModal mode={authMode} close={() => setAuthMode(null)} notify={notify} locale={locale} />

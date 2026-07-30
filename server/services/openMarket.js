@@ -18,8 +18,10 @@ const staleMaxMs = Math.max(1, Number(process.env.MARKET_STALE_MAX_DAYS || 30)) 
 const requestTimeoutMs = Math.min(45_000, Math.max(5_000, Number(process.env.OVERPASS_TIMEOUT_MS || 18_000)))
 const totalTimeoutMs = Math.min(90_000, Math.max(requestTimeoutMs, Number(process.env.OVERPASS_TOTAL_TIMEOUT_MS || 32_000)))
 const cacheCoordinatePrecision = Math.min(4, Math.max(2, Number(process.env.MARKET_CACHE_COORDINATE_PRECISION || 3)))
+const denseScanRadiusMeters = Math.min(10_000, Math.max(3_000, Number(process.env.OVERPASS_DENSE_SCAN_RADIUS_METERS || 5_000)))
 const userAgent = process.env.OSM_USER_AGENT || 'LaunchBaseSearch/1.0 (local market analysis application)'
 const normalizationVersion = 2
+const endpointQueues = new Map()
 
 const splitTag = (filter) => {
   const separator = filter.indexOf('=')
@@ -86,50 +88,95 @@ function cachedPlaces(payload) {
 
 const foodAmenities = ['cafe', 'restaurant', 'fast_food', 'food_court', 'ice_cream']
 
-export function buildOverpassMarketQuery({ radius, lat, lng }) {
+export function marketScanScopesForRadius(radius) {
+  return Number(radius) >= denseScanRadiusMeters
+    ? ['markers']
+    : ['full', 'markers']
+}
+
+export function buildOverpassMarketQuery({ radius, lat, lng, scope = 'full' }) {
+  const selector = scope === 'markers' ? 'node' : 'nwr'
   const amenityPattern = [...new Set([...foodAmenities, ...commercialAmenityValues])].join('|')
   const leisurePattern = commercialLeisureValues.join('|')
   const tourismPattern = commercialTourismValues.join('|')
-  return `[out:json][timeout:20];
+  const focused = scope === 'focused' || scope === 'markers'
+  const extendedQueries = focused
+    ? `  ${selector}(around:${radius},${lat},${lng})["office"="coworking"];`
+    : `  ${selector}(around:${radius},${lat},${lng})["office"]["office"!~"^(government|ngo|political_party|religion)$"];
+  ${selector}(around:${radius},${lat},${lng})["tourism"~"^(${tourismPattern})$"];`
+  const resourceSettings = scope === 'markers'
+    ? '[out:json][timeout:18][maxsize:268435456]'
+    : '[out:json][timeout:20]'
+  return `${resourceSettings};
 (
-  nwr(around:${radius},${lat},${lng})["shop"];
-  nwr(around:${radius},${lat},${lng})["craft"];
-  nwr(around:${radius},${lat},${lng})["office"]["office"!~"^(government|ngo|political_party|religion)$"];
-  nwr(around:${radius},${lat},${lng})["healthcare"];
-  nwr(around:${radius},${lat},${lng})["amenity"~"^(${amenityPattern})$"];
-  nwr(around:${radius},${lat},${lng})["leisure"~"^(${leisurePattern})$"];
-  nwr(around:${radius},${lat},${lng})["tourism"~"^(${tourismPattern})$"];
+  ${selector}(around:${radius},${lat},${lng})["shop"];
+  ${selector}(around:${radius},${lat},${lng})["craft"];
+${extendedQueries}
+  ${selector}(around:${radius},${lat},${lng})["healthcare"];
+  ${selector}(around:${radius},${lat},${lng})["amenity"~"^(${amenityPattern})$"];
+  ${selector}(around:${radius},${lat},${lng})["leisure"~"^(${leisurePattern})$"];
 );
 out center tags qt;`
 }
 
-async function fetchAndCacheMarket({ cacheKey, radius, roundedLat, roundedLng }) {
-  const query = buildOverpassMarketQuery({
-    radius,
-    lat: roundedLat,
-    lng: roundedLng,
-  })
+function queryHash(value) {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0
+  }
+  return Math.abs(hash)
+}
 
+function distributeEndpoints(endpoints, query, enabled) {
+  if (!enabled || endpoints.length < 2) return endpoints
+  const offset = queryHash(query) % endpoints.length
+  return [...endpoints.slice(offset), ...endpoints.slice(0, offset)]
+}
+
+// Serialize requests per public provider. Separate providers can still serve
+// different scans concurrently without creating a same-IP request stampede.
+function scheduleEndpointRequest(endpoint, task) {
+  const previous = endpointQueues.get(endpoint) || Promise.resolve()
+  const request = previous.catch(() => {}).then(task)
+  const tail = request.catch(() => {}).finally(() => {
+    if (endpointQueues.get(endpoint) === tail) endpointQueues.delete(endpoint)
+  })
+  endpointQueues.set(endpoint, tail)
+  return request
+}
+
+export async function requestOverpass(query, {
+  endpoints = OVERPASS_URLS,
+  totalBudgetMs = totalTimeoutMs,
+  perRequestTimeoutMs = requestTimeoutMs,
+  fetchImpl = fetch,
+  distribute = endpoints === OVERPASS_URLS,
+} = {}) {
   let body
   let successfulEndpoint
   let emptyResponse
   const errors = []
   const requestStartedAt = Date.now()
-  for (const endpoint of OVERPASS_URLS) {
-    const remainingMs = totalTimeoutMs - (Date.now() - requestStartedAt)
+  const orderedEndpoints = distributeEndpoints(endpoints, query, distribute)
+  for (const endpoint of orderedEndpoints) {
+    const remainingMs = totalBudgetMs - (Date.now() - requestStartedAt)
     if (remainingMs < 1000) {
-      errors.push(`total request budget of ${totalTimeoutMs}ms was exhausted`)
+      errors.push(`total request budget of ${totalBudgetMs}ms was exhausted`)
       break
     }
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-          'User-Agent': userAgent,
-        },
-        body: new URLSearchParams({ data: query }),
-        signal: AbortSignal.timeout(Math.min(requestTimeoutMs, remainingMs)),
+      const response = await scheduleEndpointRequest(endpoint, async () => {
+        const requestRemainingMs = totalBudgetMs - (Date.now() - requestStartedAt)
+        if (requestRemainingMs < 1000) throw new Error(`total request budget of ${totalBudgetMs}ms was exhausted while queued`)
+        return fetchImpl(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            'User-Agent': userAgent,
+          },
+          body: new URLSearchParams({ data: query }),
+          signal: AbortSignal.timeout(Math.min(perRequestTimeoutMs, requestRemainingMs)),
+        })
       })
       if (!response.ok) throw new Error(`request failed (${response.status})`)
       const candidate = await response.json()
@@ -151,21 +198,65 @@ async function fetchAndCacheMarket({ cacheKey, radius, roundedLat, roundedLng })
     successfulEndpoint = emptyResponse.endpoint
   }
   if (!body) throw new Error(`OpenStreetMap market request failed: ${errors.join('; ')}`)
+  return { body, endpoint: successfulEndpoint, errors }
+}
 
-  const places = normalizeMarketPlaces(body.elements || [])
+async function fetchAndCacheMarket({ cacheKey, radius, roundedLat, roundedLng }) {
+  const [primaryScope] = marketScanScopesForRadius(radius)
+  const useNodeFirst = primaryScope === 'markers'
+  const primaryQuery = buildOverpassMarketQuery({
+    radius,
+    lat: roundedLat,
+    lng: roundedLng,
+    scope: primaryScope,
+  })
+
+  let response
+  let scanScope = 'full'
+  let warning
+  try {
+    response = await requestOverpass(primaryQuery)
+    if (useNodeFirst) {
+      scanScope = 'node-focused'
+      warning = 'A high-density node scan was used to keep the live market responsive; mapped polygon businesses may be incomplete'
+    }
+  } catch (primaryError) {
+    if (useNodeFirst) throw primaryError
+    const markerQuery = buildOverpassMarketQuery({
+      radius,
+      lat: roundedLat,
+      lng: roundedLng,
+      scope: 'markers',
+    })
+    try {
+      response = await requestOverpass(markerQuery, {
+        totalBudgetMs: Math.min(totalTimeoutMs, 32_000),
+        perRequestTimeoutMs: Math.min(requestTimeoutMs, 18_000),
+      })
+      scanScope = 'node-focused'
+      warning = `The complete mapped-business query was unavailable (${primaryError.message}); using a high-density node scan`
+    } catch (markerError) {
+      throw new Error(`${primaryError.message}; node-marker retry also failed: ${markerError.message}`)
+    }
+  }
+
+  const places = normalizeMarketPlaces(response.body.elements || [])
   const payload = {
     provider: 'openstreetmap-overpass',
-    endpoint: successfulEndpoint,
+    endpoint: response.endpoint,
     fetchedAt: new Date().toISOString(),
     radiusMeters: radius,
+    scanScope,
     normalizationVersion,
     places,
+    ...(warning ? { warning } : {}),
   }
-  await writeExternalCache(cacheKey, payload, 'openstreetmap-overpass', cacheSeconds)
+  const payloadCacheSeconds = scanScope === 'full' ? cacheSeconds : Math.min(cacheSeconds, 6 * 60 * 60)
+  await writeExternalCache(cacheKey, payload, 'openstreetmap-overpass', payloadCacheSeconds)
   return { ...payload, cacheStatus: 'database-refreshed' }
 }
 
-export async function getNearbyBusinesses(location, radiusMeters, _benchmarks) {
+export async function getNearbyBusinesses(location, radiusMeters, _benchmarks, { forceRefresh = false } = {}) {
   const radius = Math.min(Math.max(Math.round(radiusMeters), 500), 10000)
   const roundedLat = Number(location.lat).toFixed(4)
   const roundedLng = Number(location.lng).toFixed(4)
@@ -190,7 +281,7 @@ export async function getNearbyBusinesses(location, radiusMeters, _benchmarks) {
       }
     }
   }
-  if (cached?.fresh) return {
+  if (cached?.fresh && !forceRefresh) return {
     ...cached.payload,
     places: cachedPlaces(cached.payload),
     cacheStatus: 'database-hit',
@@ -201,7 +292,7 @@ export async function getNearbyBusinesses(location, radiusMeters, _benchmarks) {
     && Number.isFinite(cached.expiresAt)
     && Date.now() - cached.expiresAt <= staleMaxMs
 
-  if (staleIsUsable) {
+  if (staleIsUsable && !forceRefresh) {
     runInBackground(`market:${cacheKey}`, refresh)
     return {
       ...cached.payload,

@@ -50,6 +50,7 @@ const analysisInput = z.object({
   lat: z.coerce.number().min(0.8).max(7.6).optional(),
   lng: z.coerce.number().min(99.5).max(119.5).optional(),
   radiusKm: z.coerce.number().min(1).max(20).default(5),
+  refresh: z.boolean().optional().default(false),
 }).superRefine((value, context) => {
   const hasQuery = Boolean(value.query)
   const hasCoordinates = value.lat !== undefined && value.lng !== undefined
@@ -67,11 +68,11 @@ const analysisCacheKey = (input) => input.query
 
 async function runAnalysis(input) {
   const key = analysisCacheKey(input)
-  const cached = analysisResultCache.get(key)
+  const cached = input.refresh ? null : analysisResultCache.get(key)
   if (cached) return { ...cached.result, runtimeCache: 'hit' }
 
-  return singleFlight(`analysis:${key}`, async () => {
-    const cachedDuringWait = analysisResultCache.get(key)
+  return singleFlight(`analysis:${key}${input.refresh ? ':refresh' : ''}`, async () => {
+    const cachedDuringWait = input.refresh ? null : analysisResultCache.get(key)
     if (cachedDuringWait) return { ...cachedDuringWait.result, runtimeCache: 'hit' }
 
     const [location, benchmarks] = await Promise.all([
@@ -82,7 +83,7 @@ async function runAnalysis(input) {
     ])
     const [statistics, market] = await Promise.all([
       getAreaStatistics(location),
-      getNearbyBusinesses(location, input.radiusKm * 1000, benchmarks),
+      getNearbyBusinesses(location, input.radiusKm * 1000, benchmarks, { forceRefresh: input.refresh }),
     ])
     const complete = buildAnalysis({ location, statistics, market, benchmarks, radiusKm: input.radiusKm })
     const result = {
@@ -90,10 +91,12 @@ async function runAnalysis(input) {
       searchQuery: input.query || `${input.lat},${input.lng}`,
       runtimeCache: 'miss',
     }
-    analysisResultCache.set(key, {
-      result,
-      expiresAt: Date.now() + (complete.dataQuality.supplyAvailable ? analysisCacheSeconds : 20) * 1000,
-    })
+    if (complete.dataQuality.supplyAvailable) {
+      analysisResultCache.set(key, {
+        result,
+        expiresAt: Date.now() + analysisCacheSeconds * 1000,
+      })
+    }
     return result
   })
 }
@@ -196,8 +199,13 @@ app.use((error, _request, response, _next) => {
   if (error instanceof z.ZodError) {
     return response.status(400).json({ error: 'Invalid request', details: error.flatten() })
   }
-  console.error(error)
-  response.status(500).json({ error: error.message || 'Unexpected server error' })
+  if (!error.statusCode || error.statusCode >= 500) console.error(error)
+  response
+    .status(error.statusCode || 500)
+    .json({
+      error: error.message || 'Unexpected server error',
+      ...(error.code ? { code: error.code } : {}),
+    })
 })
 
 const server = app.listen(port, host, () => {

@@ -6,7 +6,7 @@ description: A sophisticated, high-contrast dark theme optimized for enterprise-
 colors:
   bg: "#141618"
   surface: "#17191c"
-  primary: "#f9d022"
+  primary: "#e0173b"
   text: "#ffffff"
   textMuted: "#848e9c"
   border: "rgba(230, 232, 236, 0.1)"
@@ -82,11 +82,11 @@ motion:
   heroAnimation: "subtle-drift-15s-infinite"
 ---
 ## Overview
-The Niteco visual system is built on a "Digital Excellence" philosophy. It uses a deep charcoal background to create a premium, cinematic feel that allows the bright yellow primary color to serve as a focused beacon for calls to action and critical information.
+The Niteco visual system is built on a "Digital Excellence" philosophy. It uses a deep charcoal background to create a premium, cinematic feel that allows the vivid crimson red primary color to serve as a focused beacon for calls to action and critical information.
 
 ## Colors
 The palette is dominated by dark neutrals with high-chroma accents.
-- **Primary (#f9d022):** Used for primary buttons, active states, icons, and significant numbers.
+- **Primary (#e0173b):** Used for primary buttons, active states, icons, and significant numbers.
 - **Backgrounds:** A tiered system of #141618 (base) and #17191c (elevated surfaces).
 - **Case Study Accents:** Specific deep greens, reds, and purples are used for full-block brand background storytelling.
 
@@ -125,12 +125,12 @@ Depth is created through color layering rather than drop shadows.
 - **Hero Graphics:** Abstract SVG paths utilize a 15-second infinite `subtle-drift` animation to add life to the background without distracting from copy.
 
 ## Do's and Don'ts
-- **Do:** Use the primary yellow for interactive elements and brand markers.
+- **Do:** Use the primary crimson for interactive elements and brand markers.
 - **Do:** Use borders (1px white/10) to separate sections on the dark background.
 - **Don't:** Use drop shadows on dark surfaces; rely on contrast and borders.
 - **Don't:** Mix font families; stick to Plus Jakarta Sans for all weights.
 
 ## Accessibility
 - Maintain a minimum of 3:1 contrast ratio for graphical elements and 4.5:1 for body text.
-- All interactive grid blocks must include `focus-ring-4` with primary yellow for keyboard navigation.
+- All interactive grid blocks must include `focus-ring-4` with primary crimson for keyboard navigation.
 - SVGs and images must include descriptive ARIA labels or alt text.

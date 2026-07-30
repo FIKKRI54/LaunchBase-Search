@@ -17,7 +17,7 @@ const page = {
 
 const colors = {
   ink: [21, 23, 25],
-  yellow: [249, 208, 34],
+  brand: [224, 23, 59],
   gray: [92, 97, 104],
   pale: [247, 247, 244],
   line: [220, 222, 218],
@@ -97,7 +97,7 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
   const section = (title) => {
     ensure(16)
     y += 3
-    pdf.setFillColor(...colors.yellow)
+    pdf.setFillColor(...colors.brand)
     pdf.rect(page.margin, y, 4, 8, 'F')
     setText(15, colors.ink, 'bold')
     pdf.text(text(title), page.margin + 8, y + 6.5)
@@ -115,9 +115,9 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
 
   pdf.setFillColor(...colors.ink)
   pdf.rect(0, 0, page.width, 58, 'F')
-  pdf.setFillColor(...colors.yellow)
+  pdf.setFillColor(...colors.brand)
   pdf.rect(0, 0, 7, 58, 'F')
-  setText(10, colors.yellow, 'bold')
+  setText(10, colors.brand, 'bold')
   pdf.text('LAUNCHBASE SEARCH', page.margin, 18)
   setText(25, colors.white, 'bold')
   pdf.text(locale === 'ms' ? 'Laporan peluang pasaran' : 'Market opportunity report', page.margin, 31)
@@ -159,10 +159,10 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
     const height = 36 + cardLines.length * 4 + (risk ? 8 : 0)
     ensure(height + 5)
 
-    pdf.setDrawColor(...(index === 0 ? colors.yellow : colors.line))
+    pdf.setDrawColor(...(index === 0 ? colors.brand : colors.line))
     pdf.setLineWidth(index === 0 ? 1.1 : 0.35)
     pdf.roundedRect(page.margin, y, page.contentWidth, height, 3, 3, 'S')
-    pdf.setFillColor(...(index === 0 ? colors.yellow : colors.ink))
+    pdf.setFillColor(...(index === 0 ? colors.brand : colors.ink))
     pdf.circle(page.margin + 9, y + 10, 5, 'F')
     setText(8, index === 0 ? colors.ink : colors.white, 'bold')
     pdf.text(String(index + 1), page.margin + 9, y + 11.8, { align: 'center' })
@@ -170,7 +170,7 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
     setText(12, colors.ink, 'bold')
     pdf.text(text(opportunityName(item, locale)), page.margin + 18, y + 10.8)
     const scoreX = page.width - page.margin - 6
-    setText(18, index === 0 ? [154, 115, 0] : colors.ink, 'bold')
+    setText(18, index === 0 ? [151, 8, 38] : colors.ink, 'bold')
     pdf.text(String(item.successScore), scoreX, y + 11, { align: 'right' })
     setText(7, colors.gray, 'normal')
     pdf.text(text(scoreBand(item.scoreBand)), scoreX, y + 16, { align: 'right' })
@@ -185,7 +185,7 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
     )
     pdf.text(cardLines, page.margin + 5, y + 29)
     if (risk) {
-      setText(7.5, [180, 83, 9], 'bold')
+      setText(7.5, [176, 13, 47], 'bold')
       pdf.text(wrapped(`${locale === 'ms' ? 'Perhatian' : 'Caution'}: ${risk}`, 164), page.margin + 5, y + height - 5)
     }
     y += height + 5
@@ -230,7 +230,7 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
   paragraph(methodology?.demand)
   paragraph(methodology?.competitorEstimate)
   paragraph(methodology?.demographicFit)
-  paragraph(methodology?.disclaimer, { color: [154, 115, 0], style: 'bold' })
+  paragraph(methodology?.disclaimer, { color: [151, 8, 38], style: 'bold' })
   ;(analysis.sources || []).forEach((source) => paragraph(`${source.name}: ${source.url}`, { size: 7.5, gap: 1.5, lineHeight: 4 }))
 
   const totalPages = pdf.getNumberOfPages()

@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildAnalysis, buildDetailedReport, evaluateCulturalFit } from './analysis.js'
+import {
+  buildAnalysis,
+  buildDetailedReport,
+  evaluateCulturalFit,
+  selectMapBusinesses,
+} from './analysis.js'
 
 const input = {
   location: { name: 'Test Town', district: 'Test', state: 'Test', lat: 3, lng: 101 },
@@ -86,6 +91,85 @@ test('keeps full market counts while bounding the interactive-map payload', () =
   assert.ok(result.mapBusinesses.length <= 1000)
   assert.ok(result.mapBusinesses.some((place) => place.type === 'ice_cream'))
   assert.ok(result.mapBusinesses.some((place) => place.type === 'convenience'))
+})
+
+test('spreads a hostile geographically ordered marker payload across the scan area', () => {
+  const clusters = [
+    { label: 'south-west', lat: 2.985, lng: 100.985 },
+    { label: 'south-east', lat: 2.985, lng: 101.015 },
+    { label: 'north-west', lat: 3.015, lng: 100.985 },
+    { label: 'north-east', lat: 3.015, lng: 101.015 },
+  ]
+  const places = clusters.flatMap((cluster, clusterIndex) =>
+    Array.from({ length: 800 }, (_, index) => ({
+      id: `node/${clusterIndex}-${index}`,
+      name: `${cluster.label} business ${index}`,
+      lat: cluster.lat + (index % 10) * 0.00001,
+      lng: cluster.lng + (index % 8) * 0.00001,
+      marketType: index % 7 === 0 ? 'bakery' : 'convenience',
+    })))
+
+  const selected = selectMapBusinesses(places, 120, {
+    lat: 3,
+    lng: 101,
+    radiusMeters: 3000,
+  })
+  const quadrantCounts = {
+    southWest: selected.filter((place) => place.lat < 3 && place.lng < 101).length,
+    southEast: selected.filter((place) => place.lat < 3 && place.lng > 101).length,
+    northWest: selected.filter((place) => place.lat > 3 && place.lng < 101).length,
+    northEast: selected.filter((place) => place.lat > 3 && place.lng > 101).length,
+  }
+
+  assert.equal(selected.length, 120)
+  assert.ok(Object.values(quadrantCounts).every((count) => count >= 25), JSON.stringify(quadrantCounts))
+  assert.ok(selected.some((place) => place.marketType === 'bakery'))
+  assert.ok(selected.some((place) => place.marketType === 'convenience'))
+})
+
+test('discloses and caps evidence from a focused fallback scan', () => {
+  const places = Array.from({ length: 500 }, (_, index) => ({
+    id: `node/${index}`,
+    name: `Mapped shop ${index}`,
+    lat: 3 + index * 0.000001,
+    lng: 101 + index * 0.000001,
+    marketType: 'convenience',
+    marketTypeLabel: 'Convenience store',
+    marketFacets: [],
+    specificity: 'specific',
+    tags: { shop: 'convenience' },
+  }))
+  const result = buildAnalysis({
+    ...input,
+    market: { ...input.market, scanScope: 'focused', places },
+  })
+
+  assert.ok(result.dataQuality.marketEvidence.score <= 85)
+  assert.match(result.dataQuality.marketEvidence.note, /focused retail and service scan/i)
+})
+
+test('keeps node-first marker evidence useful but explicitly partial', () => {
+  const places = Array.from({ length: 900 }, (_, index) => ({
+    id: `node/${index}`,
+    name: `Mapped shop ${index}`,
+    lat: 3.1 + index * 0.000001,
+    lng: 101.6 + index * 0.000001,
+    tags: { shop: 'convenience' },
+    marketType: 'convenience',
+    marketTypeLabel: 'Convenience store',
+    marketGroup: 'retail',
+    classificationConfidence: 'high',
+    specificity: 'specific',
+  }))
+  const result = buildAnalysis({
+    ...input,
+    market: { ...input.market, scanScope: 'node-focused', places },
+  })
+
+  assert.equal(result.dataQuality.marketScanStatus, 'partial')
+  assert.ok(result.dataQuality.marketEvidence.score <= 78)
+  assert.match(result.dataQuality.marketEvidence.note, /node scan/i)
+  assert.ok(result.mapBusinesses.length > 0)
 })
 
 test('does not treat zero mapped competitors as proven zero supply', () => {

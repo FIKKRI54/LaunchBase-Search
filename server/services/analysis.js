@@ -5,7 +5,33 @@ const money = (value) => Math.round(value)
 const oneDecimal = (value) => Number(value.toFixed(1))
 const mapResponseBusinessLimit = Math.min(2500, Math.max(300, Number(process.env.MAP_RESPONSE_BUSINESS_LIMIT || 1000)))
 
-function selectMapBusinesses(places, limit = mapResponseBusinessLimit) {
+const stablePlaceOrder = (left, right) => String(left.id).localeCompare(String(right.id))
+
+function interleaveTypes(places) {
+  const byType = new Map()
+  for (const place of [...places].sort(stablePlaceOrder)) {
+    const type = place.marketType || 'other'
+    const group = byType.get(type) || []
+    group.push(place)
+    byType.set(type, group)
+  }
+  const queues = [...byType.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, entries]) => entries)
+  const interleaved = []
+  for (let depth = 0; interleaved.length < places.length; depth += 1) {
+    for (const queue of queues) {
+      if (queue[depth]) interleaved.push(queue[depth])
+    }
+  }
+  return interleaved
+}
+
+export function selectMapBusinesses(
+  places,
+  limit = mapResponseBusinessLimit,
+  { lat, lng, radiusMeters } = {},
+) {
   const eligible = places.filter((place) =>
     place.marketType !== 'other_business'
     && Number.isFinite(Number(place.lat))
@@ -13,24 +39,46 @@ function selectMapBusinesses(places, limit = mapResponseBusinessLimit) {
   )
   if (eligible.length <= limit) return eligible
 
-  const selected = []
-  const selectedIds = new Set()
-  const typeCounts = new Map()
-  const typeTotal = new Set(eligible.map((place) => place.marketType)).size
-  const nicheQuota = Math.max(10, Math.floor(limit * 0.35 / Math.max(1, typeTotal)))
-
+  const centerLat = Number.isFinite(Number(lat))
+    ? Number(lat)
+    : eligible.reduce((total, place) => total + Number(place.lat), 0) / eligible.length
+  const centerLng = Number.isFinite(Number(lng))
+    ? Number(lng)
+    : eligible.reduce((total, place) => total + Number(place.lng), 0) / eligible.length
+  const latRadius = Number.isFinite(Number(radiusMeters))
+    ? Math.max(500, Number(radiusMeters)) / 111_320
+    : Math.max(...eligible.map((place) => Math.abs(Number(place.lat) - centerLat)), 0.01)
+  const lngScale = Math.max(0.2, Math.cos(centerLat * Math.PI / 180))
+  const lngRadius = Number.isFinite(Number(radiusMeters))
+    ? Math.max(500, Number(radiusMeters)) / (111_320 * lngScale)
+    : Math.max(...eligible.map((place) => Math.abs(Number(place.lng) - centerLng)), 0.01)
+  const gridSide = Math.min(24, Math.max(8, Math.ceil(Math.sqrt(limit / 4))))
+  const cells = new Map()
   for (const place of eligible) {
-    const count = typeCounts.get(place.marketType) || 0
-    if (count >= nicheQuota) continue
-    selected.push(place)
-    selectedIds.add(place.id)
-    typeCounts.set(place.marketType, count + 1)
-    if (selected.length >= limit) return selected
+    const x = clamp(Math.floor(((Number(place.lng) - centerLng + lngRadius) / (lngRadius * 2)) * gridSide), 0, gridSide - 1)
+    const y = clamp(Math.floor(((Number(place.lat) - centerLat + latRadius) / (latRadius * 2)) * gridSide), 0, gridSide - 1)
+    const key = `${y}:${x}`
+    const bucket = cells.get(key) || []
+    bucket.push(place)
+    cells.set(key, bucket)
   }
-  for (const place of eligible) {
-    if (selectedIds.has(place.id)) continue
-    selected.push(place)
-    if (selected.length >= limit) break
+
+  // Interleave both spatial cells and business types. OpenStreetMap's `qt`
+  // output is geographically ordered, so taking the first N records creates
+  // a misleading marker pile in one corner of a dense scan.
+  const cellQueues = [...cells.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true }))
+    .map(([, bucket]) => interleaveTypes(bucket))
+  const selected = []
+  for (let depth = 0; selected.length < limit; depth += 1) {
+    let added = false
+    for (const queue of cellQueues) {
+      if (!queue[depth]) continue
+      selected.push(queue[depth])
+      added = true
+      if (selected.length >= limit) break
+    }
+    if (!added) break
   }
   return selected
 }
@@ -80,10 +128,21 @@ function marketEvidenceFor(market, studyPopulation) {
   const coverageFactor = clamp(mappedPerThousandResidents / 3.5, 0.12, 1)
   const namedShare = mapped ? named / mapped : 0
   const classifiedShare = mapped ? classified / mapped : 0
+  const partialScan = market.scanScope === 'focused' || market.scanScope === 'node-focused'
+  const scanScopeFactor = market.scanScope === 'node-focused'
+    ? 0.78
+    : market.scanScope === 'focused'
+      ? 0.88
+      : 1
+  const evidenceCeiling = market.scanScope === 'node-focused'
+    ? 74
+    : market.scanScope === 'focused'
+      ? 85
+      : 100
   const score = Math.round(clamp(
-    coverageFactor * 65 + namedShare * 20 + classifiedShare * 15,
+    (coverageFactor * 65 + namedShare * 20 + classifiedShare * 15) * scanScopeFactor,
     5,
-    100,
+    evidenceCeiling,
   ))
   const level = score >= 75 ? 'high' : score >= 45 ? 'medium' : 'low'
 
@@ -94,7 +153,11 @@ function marketEvidenceFor(market, studyPopulation) {
     mappedPerThousandResidents: Number(mappedPerThousandResidents.toFixed(2)),
     namedShare: Number(namedShare.toFixed(2)),
     classifiedShare: Number(classifiedShare.toFixed(2)),
-    note: level === 'high'
+    note: partialScan
+      ? market.scanScope === 'node-focused'
+        ? 'A high-density node scan was used for reliability. It provides live storefront markers, but businesses mapped only as building polygons may be missing.'
+        : 'A focused retail and service scan was used after the wider market query failed; general office and tourism coverage may be incomplete.'
+      : level === 'high'
       ? 'The mapped market is relatively detailed, but unmapped businesses can still exist.'
       : 'Mapped supply appears incomplete; category counts are blended with a conservative density baseline.',
   }
@@ -481,7 +544,11 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
     },
     opportunities,
     marketBreakdown,
-    mapBusinesses: selectMapBusinesses(market.places)
+    mapBusinesses: selectMapBusinesses(market.places, mapResponseBusinessLimit, {
+      lat: location.lat,
+      lng: location.lng,
+      radiusMeters: radiusKm * 1000,
+    })
       .map((place) => ({
         id: place.id,
         name: place.name,
@@ -501,7 +568,9 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
       marketFetchedAt: market.fetchedAt,
       marketScanStatus: market.provider !== 'openstreetmap-overpass'
         ? 'unavailable'
-        : market.places.length ? 'complete' : 'complete-empty',
+        : market.places.length
+          ? market.scanScope === 'full' ? 'complete' : 'partial'
+          : 'complete-empty',
       supplyAvailable: market.provider === 'openstreetmap-overpass',
       mappedBusinesses: market.places.length,
       classifiedBusinesses,

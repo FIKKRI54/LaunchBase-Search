@@ -9,6 +9,15 @@ const geocodeCacheSeconds = Math.max(1, Number(process.env.GEOCODE_CACHE_DAYS ||
 const geocodeStaleMaxMs = Math.max(1, Number(process.env.GEOCODE_STALE_MAX_DAYS || 365)) * 24 * 60 * 60 * 1000
 const districtCache = new TtlLruCache(32)
 
+export class MalaysiaLocationError extends Error {
+  constructor(message = 'LaunchBase currently supports locations within Malaysia only') {
+    super(message)
+    this.name = 'MalaysiaLocationError'
+    this.code = 'MALAYSIA_ONLY'
+    this.statusCode = 400
+  }
+}
+
 const knownLocations = [
   { terms: ['kuala lumpur', 'klcc'], name: 'Kuala Lumpur', district: 'W.P. Kuala Lumpur', state: 'W.P. Kuala Lumpur', lat: 3.139, lng: 101.6869 },
   { terms: ['johor bahru', 'jb'], name: 'Johor Bahru', district: 'Johor Bahru', state: 'Johor', lat: 1.4927, lng: 103.7414 },
@@ -147,7 +156,12 @@ export function chooseBestLocationResult(results, searchQuery) {
   })[0]
 }
 
+export function isMalaysianLocationResult(result) {
+  return String(result?.address?.country_code || result?.country_code || '').toLowerCase() === 'my'
+}
+
 async function locationFromReverseResult(result, fallbackName) {
+  if (!isMalaysianLocationResult(result)) throw new MalaysiaLocationError()
   const address = result.address || {}
   const districtMatch = await matchGovernmentDistrict(address, address.state || '')
   const localityAddress = [
@@ -176,6 +190,7 @@ async function locationFromReverseResult(result, fallbackName) {
     state: districtMatch.state,
     lat: Number(result.lat),
     lng: Number(result.lon),
+    countryCode: 'my',
     provider: 'openstreetmap-nominatim',
     approximate: false,
     attribution: '© OpenStreetMap contributors',
@@ -199,7 +214,8 @@ async function geocodeMalaysia(searchQuery) {
       break
     }
   }
-  if (!result) throw new Error(`No Malaysian location found for "${searchQuery}"`)
+  if (!result) throw new MalaysiaLocationError(`No location in Malaysia was found for "${searchQuery}"`)
+  if (!isMalaysianLocationResult(result)) throw new MalaysiaLocationError()
 
   const address = result.address || {}
   const districtMatch = await matchGovernmentDistrict(address, address.state || '')
@@ -221,6 +237,7 @@ async function geocodeMalaysia(searchQuery) {
     state: districtMatch.state,
     lat: Number(result.lat),
     lng: Number(result.lon),
+    countryCode: 'my',
     provider: 'openstreetmap-nominatim',
     approximate: false,
     attribution: '© OpenStreetMap contributors',
@@ -262,6 +279,7 @@ export async function resolveLocation(searchQuery) {
     return {
       ...match,
       formattedAddress: `${match.name}, Malaysia`,
+      countryCode: 'my',
       provider: 'local-location-index',
       approximate: true,
       cacheStatus: 'built-in-fallback',
@@ -281,7 +299,7 @@ export async function resolveCoordinates(lat, lng) {
     || longitude < 99.5
     || longitude > 119.5
   ) {
-    throw new Error('Select a point within Malaysia')
+    throw new MalaysiaLocationError('Select a point within Malaysia')
   }
 
   const roundedLat = latitude.toFixed(5)
@@ -306,8 +324,8 @@ export async function resolveCoordinates(lat, lng) {
     }))
     if (!response.ok) throw new Error(`Map point lookup failed (${response.status})`)
     const result = await response.json()
-    if (result.error || result.address?.country_code?.toLowerCase() !== 'my') {
-      throw new Error('Select a point within Malaysia')
+    if (result.error || !isMalaysianLocationResult(result)) {
+      throw new MalaysiaLocationError('Select a point within Malaysia')
     }
     const location = await locationFromReverseResult(result, `${roundedLat}, ${roundedLng}`)
     await writeExternalCache(cacheKey, location, 'openstreetmap-nominatim-reverse', geocodeCacheSeconds)
