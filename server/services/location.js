@@ -30,10 +30,13 @@ const knownLocations = [
 
 const stateAliases = {
   'federal territory of kuala lumpur': 'W.P. Kuala Lumpur',
+  'wilayah persekutuan kuala lumpur': 'W.P. Kuala Lumpur',
   'kuala lumpur': 'W.P. Kuala Lumpur',
   'federal territory of putrajaya': 'W.P. Putrajaya',
+  'wilayah persekutuan putrajaya': 'W.P. Putrajaya',
   putrajaya: 'W.P. Putrajaya',
   'federal territory of labuan': 'W.P. Labuan',
+  'wilayah persekutuan labuan': 'W.P. Labuan',
   penang: 'Pulau Pinang',
 }
 const malaysiaStates = [

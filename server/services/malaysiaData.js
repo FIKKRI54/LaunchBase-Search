@@ -49,6 +49,41 @@ const nationalDemographicFallback = {
   citizenshipShares: { citizen: 0.91, nonCitizen: 0.09 },
 }
 
+const federalTerritoryAliases = new Map([
+  ['kuala lumpur', 'W.P. Kuala Lumpur'],
+  ['wp kuala lumpur', 'W.P. Kuala Lumpur'],
+  ['w p kuala lumpur', 'W.P. Kuala Lumpur'],
+  ['wilayah persekutuan kuala lumpur', 'W.P. Kuala Lumpur'],
+  ['federal territory of kuala lumpur', 'W.P. Kuala Lumpur'],
+  ['putrajaya', 'W.P. Putrajaya'],
+  ['wp putrajaya', 'W.P. Putrajaya'],
+  ['w p putrajaya', 'W.P. Putrajaya'],
+  ['wilayah persekutuan putrajaya', 'W.P. Putrajaya'],
+  ['federal territory of putrajaya', 'W.P. Putrajaya'],
+  ['labuan', 'W.P. Labuan'],
+  ['wp labuan', 'W.P. Labuan'],
+  ['w p labuan', 'W.P. Labuan'],
+  ['wilayah persekutuan labuan', 'W.P. Labuan'],
+  ['federal territory of labuan', 'W.P. Labuan'],
+])
+
+const normalizeAreaLabel = (value = '') => String(value)
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim()
+
+export function canonicalizeGovernmentArea(location) {
+  const districtAlias = federalTerritoryAliases.get(normalizeAreaLabel(location.district))
+  const stateAlias = federalTerritoryAliases.get(normalizeAreaLabel(location.state))
+  const federalTerritory = districtAlias || stateAlias
+  if (!federalTerritory) return location
+  return {
+    ...location,
+    district: federalTerritory,
+    state: federalTerritory,
+  }
+}
+
 async function readStoredStatistic(datasetId, district, state = '') {
   const result = await database.tryQuery(
     `SELECT state, district, data_year, metrics, source_url, last_synced_at,
@@ -308,11 +343,12 @@ async function getHouseholdData(district, state) {
 }
 
 export async function getAreaStatistics(location) {
-  const fallback = fallbackData[location.district]
+  const governmentArea = canonicalizeGovernmentArea(location)
+  const fallback = fallbackData[governmentArea.district]
   const warnings = []
   const [populationResult, householdResult] = await Promise.allSettled([
-    getPopulation(location.district, location.state),
-    getHouseholdData(location.district, location.state),
+    getPopulation(governmentArea.district, governmentArea.state),
+    getHouseholdData(governmentArea.district, governmentArea.state),
   ])
 
   let population
@@ -323,7 +359,7 @@ export async function getAreaStatistics(location) {
     const error = populationResult.reason
     warnings.push(error.message)
     if (!fallback?.population) {
-      throw new Error(`Official district population was not found for ${location.district}. Try a nearby city or district name.`)
+      throw new Error(`Official district population was not found for ${governmentArea.district}. Try a nearby city or district name.`)
     }
     population = { ...fallback, cacheStatus: 'built-in-location-fallback' }
   }

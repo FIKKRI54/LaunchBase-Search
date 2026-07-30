@@ -1,6 +1,29 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getAreaStatistics, summarizePopulation } from './malaysiaData.js'
+import {
+  canonicalizeGovernmentArea,
+  getAreaStatistics,
+  summarizePopulation,
+} from './malaysiaData.js'
+
+test('canonicalizes federal-territory labels used by geocoders to DOSM labels', () => {
+  assert.deepEqual(
+    canonicalizeGovernmentArea({ district: 'Kuala Lumpur', state: 'Kuala Lumpur' }),
+    { district: 'W.P. Kuala Lumpur', state: 'W.P. Kuala Lumpur' },
+  )
+  assert.deepEqual(
+    canonicalizeGovernmentArea({
+      district: 'Kuala Lumpur',
+      state: 'Wilayah Persekutuan Kuala Lumpur',
+      lat: 3.139,
+    }),
+    {
+      district: 'W.P. Kuala Lumpur',
+      state: 'W.P. Kuala Lumpur',
+      lat: 3.139,
+    },
+  )
+})
 
 test('summarizes official age, sex, citizenship and ethnicity rows for a district', () => {
   const base = { state: 'Test State', district: 'Profile District', date: '2025-01-01' }
