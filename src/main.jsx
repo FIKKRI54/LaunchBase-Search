@@ -247,7 +247,7 @@ function Header({ openAuth, theme, toggleTheme, locale, toggleLocale }) {
     }
   }, [])
   const t = translator(locale)
-  const links = [[t('navHow'), 'how'], [t('navData'), 'data'], [t('navOpportunities'), 'opportunities'], [t('contact'), 'contact']]
+  const links = [[t('navHow'), 'how'], [t('contact'), 'contact']]
 
   return (
     <header className={`site-header ${scrolled ? 'is-scrolled' : 'is-top'} ${menuOpen ? 'menu-open' : ''} sticky top-0 z-50 border-b border-foreground/10`}>
@@ -318,12 +318,6 @@ function Hero({ onSearch, theme, locale }) {
               {t('explore')} <Icon icon="solar:arrow-right-linear" width={18} className="transition group-hover:translate-x-1" />
             </button>
           </form>
-          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-foreground/60">
-            <span className="flex items-center gap-1.5"><Icon icon="solar:shield-check-linear" width={16} />{t('noLogin')}</span>
-            <span className="flex items-center gap-1.5"><Icon icon="solar:hand-money-linear" width={16} />{t('adSupported')}</span>
-            <span className="flex items-center gap-1.5"><Icon icon="solar:refresh-circle-linear" width={16} />{t('freshInsights')}</span>
-            <span className="flex items-center gap-1.5"><Icon icon="solar:map-point-wave-linear" width={16} />{t('malaysiaOnly')}</span>
-          </div>
         </div>
       </div>
       <div className="absolute bottom-8 right-8 z-10 hidden items-center gap-3 text-[11px] uppercase tracking-[.2em] text-foreground/60 md:flex">
@@ -1549,7 +1543,7 @@ function Footer({ locale }) {
       <div className="mx-auto grid max-w-[1240px] gap-12 px-5 py-14 md:grid-cols-2 lg:px-8">
         <div><a href="#" className="flex items-center gap-2.5 font-semibold"><img src={launchbaseLogo} alt="" className="h-10 w-10 shrink-0 object-contain" />LaunchBase Search</a><p className="mt-5 max-w-sm text-sm leading-6 text-foreground/65">{t('footerCopy')}</p></div>
         <div className="grid grid-cols-2 gap-8 text-sm md:justify-self-end md:text-right">
-          <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('product')}</p><a className="block hover:text-accent" href="#how">{t('navHow')}</a><a className="block hover:text-accent" href="#contact">{t('contact')}</a><a className="block hover:text-accent" href="#data">{t('navData')}</a></div>
+          <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('product')}</p><a className="block hover:text-accent" href="#how">{t('navHow')}</a><a className="block hover:text-accent" href="#contact">{t('contact')}</a></div>
           <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('company')}</p><a className="block hover:text-accent" href="#">{t('privacy')}</a><a className="block hover:text-accent" href="#">{t('terms')}</a><a className="block hover:text-accent" href={`mailto:${CONTACT_EMAIL}`}>{t('contact')}</a></div>
         </div>
       </div>
@@ -1738,12 +1732,10 @@ function App() {
       <main>
         <Hero onSearch={search} theme={theme} locale={locale} />
         <AnalysisWorkspace analysis={analysis} loading={analysisLoading} error={analysisError} onScan={search} locale={locale} />
-        <DataMarquee locale={locale} />
         <HowItWorks theme={theme} locale={locale} />
         <div className="px-5 py-8 lg:px-8">
           <AdSenseSlot slot={import.meta.env.VITE_GOOGLE_ADSENSE_SLOT_LANDING} locale={locale} />
         </div>
-        <OpportunitySection analysis={analysis} locale={locale} />
         <ContactSection locale={locale} notify={notify} />
       </main>
       <Footer locale={locale} />
