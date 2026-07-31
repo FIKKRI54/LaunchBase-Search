@@ -1,14 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
-CREATE TABLE IF NOT EXISTS users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  plan TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'admin')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS business_benchmarks (
   slug TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -32,21 +21,6 @@ ALTER TABLE business_benchmarks
 
 ALTER TABLE business_benchmarks
   ADD COLUMN IF NOT EXISTS classifier_types JSONB NOT NULL DEFAULT '[]'::jsonb;
-
-CREATE TABLE IF NOT EXISTS analysis_runs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  search_query TEXT NOT NULL,
-  location JSONB NOT NULL,
-  inputs JSONB NOT NULL,
-  free_result JSONB NOT NULL,
-  full_result JSONB,
-  source_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS analysis_runs_created_at_idx ON analysis_runs(created_at DESC);
-CREATE INDEX IF NOT EXISTS analysis_runs_user_id_idx ON analysis_runs(user_id);
 
 CREATE TABLE IF NOT EXISTS api_cache (
   cache_key TEXT PRIMARY KEY,

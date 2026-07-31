@@ -49,7 +49,7 @@ The frontend runs on `http://localhost:5173`; the API runs on `http://127.0.0.1:
 
 Without a Google key, the complete interactive analysis remains usable. Users can search from the map, change the radius, click a point to make it the scan centre, and inspect classified competitor markers. A Google Embed key adds place, satellite and Street View tabs. Google results stay inside their iframe and are never read by the backend or used as competitor data.
 
-The PDF download is generated on demand in the browser and is never uploaded to or stored by the API. Anonymous scans are also ephemeral; only signed-in users have their analysis JSON saved for later access.
+The PDF download is generated on demand in the browser and is never uploaded to or stored by the API. Every scan is ephemeral and is not retained by the application.
 
 Location searches and map clicks are resolved through Nominatim and matched to the corresponding DOSM administrative district. Nearby businesses are queried from Overpass, categorized from OSM tags and multilingual name evidence, deduplicated by storefront name and proximity, and cached in PostgreSQL. Set `OSM_USER_AGENT` to an identifier containing your contact information before deployment.
 
@@ -105,9 +105,6 @@ For production, replace the radius-share heuristic with a population grid or cen
 
 - `GET /api/health`
 - `POST /api/analysis/free` — accepts a text `query` or Malaysian `lat`/`lng`; no account required
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `GET /api/reports/:analysisId` — free detailed report; authentication is optional
 
 ## Database-first data synchronization
 

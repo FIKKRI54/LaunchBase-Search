@@ -17,7 +17,7 @@ These files keep the public web server, static React build, Node API and Postgre
 2. In the OCI network security list and the instance firewall, allow inbound TCP `22`, `80`, and `443`. Do not expose PostgreSQL or port `8787`.
 3. Install Node.js 20+, PostgreSQL, Nginx and Certbot.
 4. Create a non-login `launchbase` system user and place the project in `/opt/launchbase`.
-5. Copy `.env.example` to `.env`, use a long random `JWT_SECRET`, and set:
+5. Copy `.env.example` to `.env` and set:
 
    ```text
    NODE_ENV=production

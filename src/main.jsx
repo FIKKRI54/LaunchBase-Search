@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -15,6 +15,7 @@ import {
   translator,
 } from './i18n.js'
 import { downloadAnalysisPdf } from './reportPdf.js'
+import { googleEmbedUrl, isGoogleMapMode } from './mapViewState.js'
 import './styles.css'
 
 const Icon = ({ icon, width = 20, className = '' }) =>
@@ -224,7 +225,7 @@ function ThemeToggle({ theme, toggle, mobile = false, locale }) {
   )
 }
 
-function Header({ openAuth, theme, toggleTheme, locale, toggleLocale }) {
+function Header({ theme, toggleTheme, locale, toggleLocale }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [scrolled, setScrolled] = useState(() => window.scrollY > 48)
 
@@ -264,7 +265,6 @@ function Header({ openAuth, theme, toggleTheme, locale, toggleLocale }) {
           <div className="site-nav-actions flex items-center gap-3">
             <button type="button" onClick={toggleLocale} className="grid h-10 min-w-10 place-items-center rounded-xl border border-foreground/15 bg-surface px-3 text-xs font-bold text-foreground/75 transition hover:border-accent hover:text-accent" aria-label={t('languageLabel')}>{t('language')}</button>
             <ThemeToggle theme={theme} toggle={toggleTheme} locale={locale} />
-            <button onClick={() => openAuth('login')} className="rounded-lg px-4 py-2.5 text-sm font-medium text-foreground/75 transition hover:text-accent">{t('login')}</button>
             <a href="#search" className="button-primary">{t('startScan')}</a>
           </div>
         </div>
@@ -278,7 +278,6 @@ function Header({ openAuth, theme, toggleTheme, locale, toggleLocale }) {
             {links.map(([label, anchor]) => <a key={anchor} onClick={() => setMenuOpen(false)} href={`#${anchor}`}>{label}</a>)}
             <button type="button" onClick={toggleLocale} className="flex h-10 items-center justify-between rounded-xl border border-foreground/15 px-4"><span>{locale === 'ms' ? 'Bahasa Melayu' : 'English'}</span><strong>{t('language')}</strong></button>
             <div><ThemeToggle theme={theme} toggle={toggleTheme} mobile locale={locale} /></div>
-            <button onClick={() => openAuth('login')} className="text-left">{t('login')}</button>
             <a onClick={() => setMenuOpen(false)} href="#search" className="mt-2 rounded-lg bg-signal px-5 py-3 text-center font-semibold text-contrast">{t('startScan')}</a>
           </div>
         </div>
@@ -472,7 +471,7 @@ function ThemeSelect({ value, onChange, options, ariaLabel, compact = false }) {
   )
 }
 
-function LeafletMarketMap({ analysis, selectedCategory, draftPoint, previewRadiusKm, onPointChange }) {
+function LeafletMarketMap({ analysis, selectedCategory, draftPoint, previewRadiusKm, onPointChange, active }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const businessLayerRef = useRef(null)
@@ -501,6 +500,12 @@ function LeafletMarketMap({ analysis, selectedCategory, draftPoint, previewRadiu
       mapRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (!active || !mapRef.current) return undefined
+    const frameId = window.requestAnimationFrame(() => mapRef.current?.invalidateSize({ pan: false }))
+    return () => window.cancelAnimationFrame(frameId)
+  }, [active])
 
   useEffect(() => {
     const map = mapRef.current
@@ -596,28 +601,20 @@ function LeafletMarketMap({ analysis, selectedCategory, draftPoint, previewRadiu
   return <div ref={containerRef} className="interactive-market-map min-h-[410px] flex-1" aria-label="Interactive market map. Click a location to select a new scan point." />
 }
 
-function GoogleEmbedView({ analysis, mode, locale }) {
+const GoogleEmbedView = memo(function GoogleEmbedView({ analysis, mode, locale }) {
   const t = translator(locale)
   const key = import.meta.env.VITE_GOOGLE_MAPS_EMBED_API_KEY
   const address = analysis.location.formattedAddress || `${analysis.location.name}, Malaysia`
-  const coordinates = `${analysis.location.lat},${analysis.location.lng}`
-  const params = new URLSearchParams({ key, region: 'MY', language: 'en' })
-  let embedMode = 'place'
-  if (mode === 'google') params.set('q', address)
-  if (mode === 'satellite') {
-    embedMode = 'view'
-    params.set('center', coordinates)
-    params.set('zoom', '14')
-    params.set('maptype', 'satellite')
-  }
-  if (mode === 'streetview') {
-    embedMode = 'streetview'
-    params.set('location', coordinates)
-    params.set('fov', '90')
-    params.set('heading', '0')
-    params.set('pitch', '0')
-  }
-  const embedUrl = `https://www.google.com/maps/embed/v1/${embedMode}?${params}`
+  const embedUrl = useMemo(() => {
+    return googleEmbedUrl({
+      key,
+      mode,
+      address,
+      lat: analysis.location.lat,
+      lng: analysis.location.lng,
+      locale,
+    })
+  }, [address, analysis.location.lat, analysis.location.lng, key, locale, mode])
   const externalMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
 
   if (!key) {
@@ -636,20 +633,59 @@ function GoogleEmbedView({ analysis, mode, locale }) {
   }
   return (
     <iframe
-      key={embedUrl}
       title={`${mode} map for ${analysis.location.name}`}
       src={embedUrl}
-      className="min-h-[410px] flex-1 border-0"
+      className="min-h-[410px] w-full flex-1 border-0"
       allowFullScreen
       loading="lazy"
       referrerPolicy="strict-origin-when-cross-origin"
     />
   )
+})
+
+class MapErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { failed: false }
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch(error, details) {
+    console.error('Map workspace recovered from an unexpected rendering error', error, details)
+  }
+
+  componentDidUpdate(previousProps) {
+    if (this.state.failed && previousProps.resetKey !== this.props.resetKey) {
+      this.setState({ failed: false })
+    }
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children
+    const malay = this.props.locale === 'ms'
+    return (
+      <div className="grid min-h-[540px] place-items-center bg-surface p-6 text-center">
+        <div className="max-w-sm rounded-2xl border border-orange-500/25 bg-orange-500/5 p-6">
+          <p className="font-semibold text-orange-600">{malay ? 'Paparan peta telah dipulihkan' : 'The map view was safely recovered'}</p>
+          <p className="mt-2 text-xs leading-5 text-foreground/60">
+            {malay ? 'Cuba buka semula peta. Imbasan pasaran anda tidak terjejas.' : 'Reopen the map view. Your market scan was not affected.'}
+          </p>
+          <button type="button" onClick={() => this.setState({ failed: false })} className="mt-4 rounded-xl bg-signal px-4 py-2 text-xs font-semibold text-contrast">
+            {malay ? 'Buka semula peta' : 'Reopen map'}
+          </button>
+        </div>
+      </div>
+    )
+  }
 }
 
 function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
   const t = translator(locale)
   const [mode, setMode] = useState('market')
+  const [googleView, setGoogleView] = useState(() => ({ analysis, mode: 'google', ready: false }))
   const [searchQuery, setSearchQuery] = useState(analysis.location.formattedAddress || analysis.location.name)
   const [radiusKm, setRadiusKm] = useState(analysis.radiusKm)
   const [selectedCategory, setSelectedCategory] = useState('all')
@@ -668,6 +704,14 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
     setDraftPoint(null)
   }, [analysis.generatedAt])
 
+  useEffect(() => {
+    if (!isGoogleMapMode(mode)) return undefined
+    const timerId = window.setTimeout(() => {
+      setGoogleView({ analysis, mode, ready: true })
+    }, 160)
+    return () => window.clearTimeout(timerId)
+  }, [analysis, mode])
+
   const submitSearch = (event) => {
     event.preventDefault()
     if (draftPoint) {
@@ -677,6 +721,10 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
     }
   }
 
+  const selectMode = (nextMode) => {
+    setMode(nextMode)
+  }
+
   return (
     <div className="relative flex min-h-[540px] flex-col bg-surface">
       <div className="flex flex-wrap gap-2 border-b border-foreground/10 p-3">
@@ -684,7 +732,7 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
           <button
             key={value}
             type="button"
-            onClick={() => setMode(value)}
+            onClick={() => selectMode(value)}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition ${
               mode === value ? 'bg-signal text-contrast' : 'bg-foreground/5 text-foreground/65 hover:text-foreground'
             }`}
@@ -721,8 +769,7 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
           {loading ? t('scanning') : draftPoint ? t('scanPoint') : t('searchScan')}
         </button>
       </form>
-      {mode === 'market' && (
-        <>
+      <div className={mode === 'market' ? 'flex min-h-[410px] flex-1 flex-col' : 'hidden'} aria-hidden={mode !== 'market'}>
           <div className="relative z-20 flex flex-col gap-2 border-b border-foreground/10 bg-surface px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between">
             <p className="text-foreground/55"><span className="font-medium text-foreground">{t('clickAnywhere')}</span> {t('chooseScanCentre')}</p>
             <div className="flex items-center gap-2 text-foreground/55">
@@ -744,10 +791,18 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
             draftPoint={draftPoint}
             previewRadiusKm={radiusKm}
             onPointChange={setDraftPoint}
+            active={mode === 'market'}
           />
-        </>
+      </div>
+      {googleView.ready && (
+        <div className={isGoogleMapMode(mode) ? 'relative flex min-h-[410px] flex-1' : 'hidden'} aria-hidden={!isGoogleMapMode(mode)}>
+          <GoogleEmbedView analysis={googleView.analysis} mode={googleView.mode} locale={locale} />
+          {(googleView.mode !== mode || googleView.analysis !== analysis) && <div className="pointer-events-none absolute inset-0 grid place-items-center bg-surface/80 backdrop-blur-sm"><span className="h-7 w-7 animate-spin rounded-full border-2 border-foreground/15 border-t-accent" /></div>}
+        </div>
       )}
-      {mode !== 'market' && <GoogleEmbedView analysis={analysis} mode={mode} locale={locale} />}
+      {!googleView.ready && isGoogleMapMode(mode) && (
+        <div className="map-fallback grid min-h-[410px] flex-1 place-items-center"><span className="h-7 w-7 animate-spin rounded-full border-2 border-foreground/15 border-t-accent" /></div>
+      )}
       {loading && <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[500] h-1 overflow-hidden bg-foreground/10"><span className="block h-full w-1/2 animate-pulse bg-signal" /></div>}
     </div>
   )
@@ -914,7 +969,9 @@ function AnalysisWorkspace({ analysis, loading, error, onScan, locale }) {
             {pdfError && <p className="mt-2 text-right text-xs text-red-500">{pdfError}</p>}
 
             <div className="mt-10 grid overflow-hidden rounded-3xl border border-foreground/10 bg-surface lg:grid-cols-[1.25fr_.75fr]">
-              <InteractiveAnalysisMap analysis={analysis} onScan={onScan} loading={loading} locale={locale} />
+              <MapErrorBoundary resetKey={analysis.analysisId || analysis.generatedAt} locale={locale}>
+                <InteractiveAnalysisMap analysis={analysis} onScan={onScan} loading={loading} locale={locale} />
+              </MapErrorBoundary>
               <div className="grid grid-cols-2 border-t border-foreground/10 lg:border-l lg:border-t-0">
                 <AreaMetric label={t('population')} value={formatNumber.format(analysis.area.population)} note={`${formatNumber.format(analysis.area.populationLow)}–${formatNumber.format(analysis.area.populationHigh)} ${locale === 'ms' ? 'julat perancangan' : 'planning range'}`} />
                 <AreaMetric label={t('medianIncome')} value={formatRinggit.format(analysis.area.medianHouseholdIncomeRm)} note={locale === 'ms' ? 'setiap isi rumah / bulan' : 'per household / month'} />
@@ -1552,61 +1609,7 @@ function Footer({ locale }) {
   )
 }
 
-function AuthModal({ mode, close, notify, locale }) {
-  const t = translator(locale)
-  const [formError, setFormError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  useEffect(() => {
-    setFormError('')
-    setSubmitting(false)
-  }, [mode])
-  if (!mode) return null
-  const login = mode === 'login'
-  const submit = async (event) => {
-    event.preventDefault()
-    setSubmitting(true)
-    setFormError('')
-    const form = new FormData(event.currentTarget)
-    try {
-      const response = await fetch(`/api/auth/${login ? 'login' : 'register'}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.get('email'), password: form.get('password') }),
-      })
-      const body = await response.json()
-      if (!response.ok) throw new Error(body.error || t('authFailed'))
-      localStorage.setItem('launchbase-token', body.token)
-      close()
-      notify(login ? t('savedReady') : t('accountCreated'))
-    } catch (error) {
-      setFormError(error.message)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <div onMouseDown={(event) => event.target === event.currentTarget && close()} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="w-full max-w-md rounded-2xl border border-foreground/10 bg-surface p-6 shadow-2xl md:p-8">
-        <div className="flex items-start justify-between">
-          <div><p className="eyebrow">LaunchBase Search</p><h2 className="mt-2 text-2xl font-semibold">{login ? t('welcome') : t('createAccount')}</h2></div>
-          <button onClick={close} className="grid h-9 w-9 place-items-center rounded-lg border border-foreground/10 text-foreground/65 transition hover:text-foreground" aria-label={t('close')}><Icon icon="solar:close-circle-linear" width={22} /></button>
-        </div>
-        <p className="mt-3 text-sm leading-6 text-foreground/65">{login ? t('authLoginCopy') : t('authRegisterCopy')}</p>
-        <form onSubmit={submit} className="mt-7 space-y-4">
-          <label className="block text-xs text-foreground/60">{t('email')}<input name="email" autoFocus required type="email" className="form-input" placeholder="you@example.com" /></label>
-          <label className="block text-xs text-foreground/60">{t('password')}<input name="password" required minLength="8" type="password" className="form-input" placeholder={t('passwordHint')} /></label>
-          {formError && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{formError}</p>}
-          <button disabled={submitting} className="h-12 w-full rounded-xl bg-signal text-sm font-semibold text-contrast transition hover:bg-[#ef3b59] disabled:cursor-wait disabled:opacity-60">{submitting ? t('pleaseWait') : t('continue')}</button>
-        </form>
-        <p className="mt-5 text-center text-xs text-foreground/60">{t('authAgreement')}</p>
-      </div>
-    </div>
-  )
-}
-
 function App() {
-  const [authMode, setAuthMode] = useState(null)
   const [toast, setToast] = useState('')
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || 'dark')
   const [locale, setLocale] = useState(() => {
@@ -1633,8 +1636,7 @@ function App() {
       ? { query: selection, radiusKm: 5 }
       : selection
     const requestKey = browserAnalysisKey(requestInput)
-    const token = localStorage.getItem('launchbase-token')
-    const cachedAnalysis = token || requestInput.refresh ? null : readBrowserAnalysis(requestKey)
+    const cachedAnalysis = requestInput.refresh ? null : readBrowserAnalysis(requestKey)
     const requestSequence = scanSequenceRef.current + 1
     scanSequenceRef.current = requestSequence
     scanAbortRef.current?.abort()
@@ -1661,7 +1663,6 @@ function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(requestInput),
         signal: controller.signal,
@@ -1692,10 +1693,7 @@ function App() {
   }
 
   useEffect(() => {
-    const closeOnEscape = (event) => event.key === 'Escape' && setAuthMode(null)
-    window.addEventListener('keydown', closeOnEscape)
     return () => {
-      window.removeEventListener('keydown', closeOnEscape)
       scanAbortRef.current?.abort()
     }
   }, [])
@@ -1723,7 +1721,6 @@ function App() {
   return (
     <>
       <Header
-        openAuth={setAuthMode}
         theme={theme}
         toggleTheme={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
         locale={locale}
@@ -1739,7 +1736,6 @@ function App() {
         <ContactSection locale={locale} notify={notify} />
       </main>
       <Footer locale={locale} />
-      <AuthModal mode={authMode} close={() => setAuthMode(null)} notify={notify} locale={locale} />
       {toast && <div className="fixed bottom-5 left-1/2 z-[120] flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-xl border border-foreground/10 bg-surface px-4 py-3 text-sm shadow-2xl"><Icon icon="solar:check-circle-bold" className="text-emerald-500" />{toast}</div>}
     </>
   )

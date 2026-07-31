@@ -4,10 +4,8 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
-import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import * as database from './db.js'
-import { createToken, optionalAuth } from './auth.js'
 import { getBenchmarks } from './benchmarks.js'
 import { resolveCoordinates, resolveLocation } from './services/location.js'
 import { getAreaStatistics } from './services/malaysiaData.js'
@@ -88,7 +86,6 @@ async function runAnalysis(input) {
     const complete = buildAnalysis({ location, statistics, market, benchmarks, radiusKm: input.radiusKm })
     const result = {
       fullResult: buildDetailedReport(complete),
-      searchQuery: input.query || `${input.lat},${input.lng}`,
       runtimeCache: 'miss',
     }
     if (complete.dataQuality.supplyAvailable) {
@@ -101,95 +98,23 @@ async function runAnalysis(input) {
   })
 }
 
-app.post('/api/analysis/free', analysisLimiter, optionalAuth, async (request, response, next) => {
+app.post('/api/analysis/free', analysisLimiter, async (request, response, next) => {
   const startedAt = performance.now()
   try {
     const input = analysisInput.parse(request.body)
-    const { fullResult, searchQuery, runtimeCache } = await runAnalysis(input)
-    const fallbackId = crypto.randomUUID()
-    const saved = request.user?.sub
-      ? await database.tryQuery(
-        `INSERT INTO analysis_runs
-          (user_id, search_query, location, inputs, free_result, full_result, source_snapshot)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id`,
-        [
-          request.user.sub,
-          searchQuery,
-          fullResult.location,
-          input,
-          fullResult,
-          fullResult,
-          { sources: fullResult.sources, generatedAt: fullResult.generatedAt },
-        ],
-      )
-      : null
+    const { fullResult, runtimeCache } = await runAnalysis(input)
     const durationMs = Math.round(performance.now() - startedAt)
     response.set('Cache-Control', 'no-store')
     response.set('Server-Timing', `analysis;dur=${durationMs};desc="${runtimeCache}"`)
     response.json({
-      analysisId: saved?.rows?.[0]?.id || fallbackId,
+      analysisId: crypto.randomUUID(),
       access: 'free-ad-supported',
       reportLocked: false,
       monetization: 'advertising',
-      persistence: saved?.rows?.[0]?.id ? 'account-json-only' : 'ephemeral',
+      persistence: 'ephemeral',
       performance: { serverMs: durationMs, runtimeCache },
       ...fullResult,
     })
-  } catch (error) {
-    next(error)
-  }
-})
-
-const credentials = z.object({
-  email: z.string().trim().email().max(200).transform((value) => value.toLowerCase()),
-  password: z.string().min(8).max(100),
-})
-
-app.post('/api/auth/register', async (request, response, next) => {
-  try {
-    if (!database.pool) return response.status(503).json({ error: 'PostgreSQL is required for account registration' })
-    const input = credentials.parse(request.body)
-    const passwordHash = await bcrypt.hash(input.password, 12)
-    const result = await database.query(
-      `INSERT INTO users (email, password_hash)
-       VALUES ($1, $2)
-       RETURNING id, email, plan`,
-      [input.email, passwordHash],
-    )
-    const user = result.rows[0]
-    response.status(201).json({ token: createToken(user), user })
-  } catch (error) {
-    if (error.code === '23505') return response.status(409).json({ error: 'An account with this email already exists' })
-    next(error)
-  }
-})
-
-app.post('/api/auth/login', async (request, response, next) => {
-  try {
-    if (!database.pool) return response.status(503).json({ error: 'PostgreSQL is required for login' })
-    const input = credentials.parse(request.body)
-    const result = await database.query('SELECT id, email, plan, password_hash FROM users WHERE email = $1', [input.email])
-    const user = result.rows[0]
-    if (!user || !(await bcrypt.compare(input.password, user.password_hash))) {
-      return response.status(401).json({ error: 'Invalid email or password' })
-    }
-    const safeUser = { id: user.id, email: user.email, plan: user.plan }
-    response.json({ token: createToken(safeUser), user: safeUser })
-  } catch (error) {
-    next(error)
-  }
-})
-
-app.get('/api/reports/:analysisId', optionalAuth, async (request, response, next) => {
-  try {
-    if (!database.pool) return response.status(503).json({ error: 'PostgreSQL is required for reports' })
-    const reportResult = await database.query(
-      'SELECT full_result FROM analysis_runs WHERE id = $1',
-      [request.params.analysisId],
-    )
-    if (!reportResult.rows[0]) return response.status(404).json({ error: 'Analysis not found' })
-    response.json({ access: 'free-ad-supported', report: reportResult.rows[0].full_result })
   } catch (error) {
     next(error)
   }
