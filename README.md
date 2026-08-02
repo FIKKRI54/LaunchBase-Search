@@ -72,7 +72,7 @@ The free result returns classification confidence, source, specificity, matching
 
 The DOSM district population snapshot now stores age-band, sex, ethnicity and citizenship shares alongside total population. Age bands affect only categories with a documented audience profile (for example, children for ice cream or seniors for pharmacies). Household spending and poverty can modestly adjust discretionary categories.
 
-Ethnicity is limited to a small cuisine-affinity adjustment. It is never treated as religion. A pork, alcohol or other restricted-product concept is withheld unless explicit aggregate religion data or strong direct local-market evidence is available. Sex data is shown as an aggregate district fact but does not alter rankings without a category-specific, defensible benchmark. Every applied factor and warning is returned with the recommendation.
+Ethnicity is displayed as official aggregate context but is not converted into presumed cuisine demand and is never treated as religion. A pork, alcohol or other restricted-product concept is withheld unless explicit aggregate religion data or strong direct local-market evidence is available. Sex data is shown as an aggregate district fact but does not alter rankings without a category-specific, defensible benchmark. Every applied factor and warning is returned with the recommendation.
 
 ## Free analysis algorithm
 
@@ -85,26 +85,34 @@ potential demand = study population
                  × household-income factor
                  × category-specific age/audience factor
                  × household-spending and affordability factors
-                 × cautious cuisine-affinity/cultural-fit factor
+                 × explicit product-suitability constraint
                  × category capture rate
 
 supportable stores = potential demand ÷ average annual store sales
 observed competitors = mapped category businesses inside the radius
-adjusted competitors = max(observed competitors, coverage-adjusted density floor)
+spatial supply = direct and substitute businesses × category similarity × distance decay
+adjusted competitors = max(spatial supply, coverage-adjusted density floor)
 new-store fair share = potential demand ÷ (adjusted competitors + 1)
 unmet demand = max(0, potential demand - adjusted competitors × average store sales)
 ```
 
-The opportunity index weights market gap (25%), demand scale (23%), fair-share viability (18%), household income (12%), competition (12%), and mapped-market evidence (10%). It is not a success probability. A confidence penalty and cap prevent missing or thin map evidence from producing a near-certain score.
+The planning score weights market gap (25%), demand scale (23%), fair-share viability (18%), household income (12%), competition (12%), and mapped-market evidence (10%). It is not a success probability. A confidence penalty and cap prevent missing or thin map evidence from producing a near-certain score. Each result also includes a range widened for population allocation, cold-start benchmark and mapped-supply uncertainty.
 
-Candidate categories and financial assumptions are stored in `business_benchmarks`. Category supply and ranking are recalculated for the selected location. The output includes observed supply, coverage-adjusted supply, evidence confidence, score reasons, risk flags, and a specific testable business format.
+Candidate categories and category-level demand benchmarks are stored in `business_benchmarks`. Category supply and ranking are recalculated for the selected location. The output includes observed supply, distance- and coverage-adjusted supply, evidence tier, uncertainty range, score reasons, risk flags, and a specific testable business format. The model abstains when mapped supply is unusable or category evidence is too thin.
 
-For production, replace the radius-share heuristic with a population grid or census small-area geometry, validate benchmarks with licensed market research, and add property, rent and footfall inputs.
+The public scan does not request private operating-cost inputs or present a break-even result. It estimates a transparent new-store revenue range for market screening; users should compare that range with independently verified site and operating costs before investing. Replace the radius-share heuristic with a population grid or small-area geometry when an appropriate Malaysian source is available.
+
+## Outcome validation
+
+Normal public scans and PDFs remain ephemeral. The database includes separate `business_outcomes` and `model_validation_runs` tables for explicitly consented partner data. A category is labelled historically calibrated only when it has a recorded passing spatial/temporal holdout validation—not merely because outcome rows exist.
+
+Validation utilities in `server/services/modelValidation.js` provide revenue error, probability calibration, interval coverage, spatial/temporal splits and baseline gates. Recommended outcomes are monthly sales and 24-month survival. The strict test set must contain both future observations and districts excluded from training.
 
 ## API routes
 
 - `GET /api/health`
 - `POST /api/analysis/free` — accepts a text `query` or Malaysian `lat`/`lng`; no account required
+- `POST /api/model/outcomes` — private bearer-token endpoint for consented partner outcomes; disabled unless `OUTCOME_INGEST_TOKEN` is configured
 
 ## Database-first data synchronization
 

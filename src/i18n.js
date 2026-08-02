@@ -8,7 +8,7 @@ const messages = {
     languageLabel: 'Tukar ke Bahasa Melayu',
     heroTitleA: 'Know where',
     heroTitleB: 'to launch.',
-    heroCopy: 'Turn population, demographic and competitor data into a clear answer: which business has the best chance to succeed here?',
+    heroCopy: 'Combine population, household and mapped-market evidence to identify which business ideas deserve local testing.',
     heroPlaceholder: 'Search a city, district or postcode',
     explore: 'Explore area',
     adSupported: 'Free, supported by ads',
@@ -63,7 +63,11 @@ const messages = {
     districtProfileCopy: 'Official aggregate data used for small, category-specific adjustments—not personal profiling.',
     rankingEyebrow: 'Evidence-adjusted ranking',
     rankingTitle: 'Best testable opportunities in this area',
+    insufficientRankingTitle: 'Ideas requiring more evidence',
+    screeningOnly: 'Public-data screening only',
+    insufficientEvidence: 'Insufficient evidence for a recommendation',
     potentialDemand: 'Potential demand',
+    estimatedRevenueRange: 'Estimated new-store range',
     supportableStores: 'Supportable stores',
     mappedBusinesses: 'Live mapped businesses',
     modelledCompetitors: 'Modelled competitors',
@@ -121,7 +125,8 @@ const messages = {
     noPrefill: 'No pre-filled recommendation',
     noPrefillCopy: 'Your search will populate this section using that area’s official statistics and nearby mapped businesses.',
     bestMatch: 'Best match',
-    opportunityIndex: 'Opportunity index',
+    opportunityIndex: 'Planning score',
+    evidenceTier: 'Evidence tier',
     mappedBusinessPlural: 'mapped businesses',
     estimatedRivals: 'estimated rivals',
     freeAccess: 'Free access',
@@ -204,7 +209,7 @@ const messages = {
     languageLabel: 'Switch to English',
     heroTitleA: 'Cari Kawasan',
     heroTitleB: 'untuk bermula.',
-    heroCopy: 'Menggunakan data penduduk, demografi dan pesaing kepada petunjuk, perniagaan manakah yang paling berpotensi berjaya di sini?',
+    heroCopy: 'Gabungkan bukti penduduk, isi rumah dan pasaran dipetakan untuk mengenal pasti idea perniagaan yang wajar diuji secara tempatan.',
     heroPlaceholder: 'Cari bandar, daerah atau poskod',
     explore: 'Cari kawasan',
     malaysiaOnly: 'Lokasi di Malaysia sahaja',
@@ -256,7 +261,11 @@ const messages = {
     districtProfileCopy: 'Data agregat rasmi digunakan untuk pelarasan kecil khusus kategori—bukan pemprofilan individu.',
     rankingEyebrow: 'Kedudukan dilaras mengikut bukti',
     rankingTitle: 'Peluang terbaik untuk diuji di kawasan ini',
+    insufficientRankingTitle: 'Idea yang memerlukan lebih banyak bukti',
+    screeningOnly: 'Saringan data awam sahaja',
+    insufficientEvidence: 'Bukti tidak mencukupi untuk cadangan',
     potentialDemand: 'Potensi permintaan',
+    estimatedRevenueRange: 'Julat anggaran kedai baharu',
     supportableStores: 'Kedai yang boleh disokong',
     mappedBusinesses: 'Perniagaan dipetakan',
     modelledCompetitors: 'Pesaing dimodelkan',
@@ -314,7 +323,8 @@ const messages = {
     noPrefill: 'Sila cari kawasan dahulu',
     noPrefillCopy: 'Carian anda akan mengisi bahagian ini menggunakan statistik rasmi kawasan dan perniagaan berdekatan yang dipetakan.',
     bestMatch: 'Padanan terbaik',
-    opportunityIndex: 'Indeks peluang',
+    opportunityIndex: 'Skor perancangan',
+    evidenceTier: 'Tahap bukti',
     mappedBusinessPlural: 'perniagaan dipetakan',
     estimatedRivals: 'pesaing dianggarkan',
     freeAccess: 'Akses percuma',
@@ -452,11 +462,12 @@ export function localizedMethodology(analysis, locale) {
   if (locale !== 'ms') return analysis.methodology
   return {
     ...analysis.methodology,
-    demand: 'Kami menganggarkan penduduk berdekatan, melaras kumpulan umur, pendapatan dan perbelanjaan isi rumah, kemudian menggunakan kadar tangkapan kategori yang berhati-hati',
-    fairShare: 'anggaran permintaan pasaran ÷ (pesaing dilaras liputan + satu kedai dicadangkan); bekalan yang diperhatikan tidak dianggap lengkap',
+    demand: 'Kami menganggarkan kumpulan perbelanjaan kategori daripada penduduk daerah yang diperuntukkan mengikut radius, keadaan isi rumah dan andaian permulaan khusus kategori. Ini ialah proksi perancangan sehingga hasil kedai Malaysia tersedia.',
+    fairShare: 'anggaran permintaan pasaran ÷ (setara pesaing dilaras jarak dan liputan + satu kedai dicadangkan); bekalan yang diperhatikan tidak dianggap lengkap',
     competitorEstimate: 'ciri perniagaan OpenStreetMap berdekatan dikelaskan melalui tag, gabungan masakan dan kamus nama Bahasa Inggeris/Melayu, kemudian digabungkan dengan asas kepadatan apabila liputan tidak lengkap',
-    demographicFit: 'Kumpulan umur hanya mempengaruhi kategori yang berkaitan. Etnik memberi pelarasan kecil pada kecenderungan masakan tetapi tidak pernah menggantikan agama. Produk terhad memerlukan bukti agama agregat atau bukti pasaran tempatan yang kukuh.',
-    disclaimer: 'Indeks peluang ialah skor perancangan perbandingan, bukan kebarangkalian kejayaan. Ia mesti disahkan sebelum pelaburan.',
+    demographicFit: 'Kumpulan umur hanya mempengaruhi kategori yang berkaitan. Etnik tidak ditukar kepada andaian permintaan pelanggan dan tidak pernah menggantikan agama. Produk terhad memerlukan bukti agama agregat atau bukti pasaran tempatan yang kukuh.',
+    validation: 'Kategori hanya dianggap dikalibrasi secara sejarah selepas lulus ujian pegangan ruang dan masa terhadap hasil kedai sebenar.',
+    disclaimer: 'Skor perancangan bukan kebarangkalian kejayaan. Julat hasil merangkumi ketidakpastian penanda aras, peruntukan penduduk dan bekalan yang dipetakan; sistem tidak membuat cadangan apabila bukti tidak boleh digunakan.',
   }
 }
 
@@ -483,8 +494,8 @@ export function localizedNextSteps(steps = [], locale) {
   if (locale !== 'ms') return steps
   const translations = {
     'Validate pedestrian and vehicle traffic for shortlisted streets.': 'Sahkan trafik pejalan kaki dan kenderaan bagi jalan yang disenarai pendek.',
-    'Request commercial rental and floor-area data from a local property agent.': 'Dapatkan data sewa komersial dan keluasan lantai daripada ejen hartanah tempatan.',
-    'Run site-level capture-rate and gravity modelling before signing a lease.': 'Jalankan pemodelan kadar tangkapan dan graviti di peringkat tapak sebelum menandatangani sewaan.',
+    'Compare the estimated revenue range with current rental quotes and operating-cost estimates.': 'Bandingkan julat hasil anggaran dengan sebut harga sewa semasa dan anggaran kos operasi.',
+    'Run a paid-intent pilot or preorder test before signing a lease.': 'Jalankan ujian niat berbayar atau prapesanan sebelum menandatangani sewaan.',
   }
   return steps.map((step) => translations[step] || step)
 }

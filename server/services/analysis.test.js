@@ -67,6 +67,8 @@ test('free detailed report adds sensitivity and validation steps without changin
   assert.equal(detailed.competitorValidation.length, 1)
   assert.equal(detailed.nextSteps.length, 3)
   assert.equal(detailed.opportunities[0].potentialDemandRm, free.opportunities[0].potentialDemandRm)
+  assert.equal('breakEven' in detailed.opportunities[0], false)
+  assert.equal(detailed.nextSteps.some((step) => /enter rent|break-even/i.test(step)), false)
 })
 
 test('keeps full market counts while bounding the interactive-map payload', () => {
@@ -295,6 +297,151 @@ test('ranks an otherwise identical heavily supplied category below a market gap'
   assert.ok(saturated.fairShareSalesRm < gap.fairShareSalesRm)
 })
 
+test('does not turn missing nasi-kandar wording into a false perfect market gap', () => {
+  const benchmarks = [
+    {
+      slug: 'nasi_kandar',
+      name: 'Nasi kandar restaurant',
+      perCapitaSpendRm: 180,
+      averageStoreSalesRm: 650000,
+      incomeElasticity: 0.4,
+      captureRate: 0.3,
+      estimatedStoresPer100k: 3,
+      classifierTypes: ['nasi_kandar'],
+      marketProfile: {
+        competition: {
+          group: 'food',
+          broadWeight: 0.018,
+          substitutes: { mamak: 0.8, indian_restaurant: 0.65, roti_canai: 0.45 },
+        },
+      },
+    },
+    {
+      slug: 'laundry',
+      name: 'Self-service laundry',
+      perCapitaSpendRm: 100,
+      averageStoreSalesRm: 360000,
+      incomeElasticity: 0.35,
+      captureRate: 0.45,
+      estimatedStoresPer100k: 6,
+      classifierTypes: ['laundry'],
+      marketProfile: {
+        competition: { group: 'services', broadWeight: 0.002, substitutes: { dry_cleaner: 0.45 } },
+      },
+    },
+  ]
+  const foodPlaces = [
+    ...Array.from({ length: 18 }, (_, index) => ({
+      id: `node/mamak-${index}`,
+      name: `Indian Muslim restaurant ${index}`,
+      marketType: 'mamak',
+      marketTypeLabel: 'Mamak restaurant',
+      marketGroup: 'food',
+      marketFacets: [],
+      specificity: 'specific',
+      tags: { amenity: 'restaurant' },
+    })),
+    ...Array.from({ length: 12 }, (_, index) => ({
+      id: `node/indian-${index}`,
+      name: `Indian restaurant ${index}`,
+      marketType: 'indian_restaurant',
+      marketTypeLabel: 'Indian restaurant',
+      marketGroup: 'food',
+      marketFacets: [],
+      specificity: 'specific',
+      tags: { amenity: 'restaurant', cuisine: 'indian' },
+    })),
+    ...Array.from({ length: 60 }, (_, index) => ({
+      id: `node/food-${index}`,
+      name: `Restaurant ${index}`,
+      marketType: 'restaurant_other',
+      marketTypeLabel: 'Restaurant',
+      marketGroup: 'food',
+      marketFacets: [],
+      specificity: 'broad',
+      tags: { amenity: 'restaurant' },
+    })),
+  ]
+  const result = buildAnalysis({
+    ...input,
+    statistics: { ...input.statistics, population: 180000 },
+    market: { ...input.market, places: foodPlaces },
+    benchmarks,
+    radiusKm: 12,
+  })
+  const nasiKandar = result.opportunities.find((item) => item.slug === 'nasi_kandar')
+
+  assert.equal(nasiKandar.competitorCount, 0)
+  assert.ok(nasiKandar.substituteCompetitors >= 20)
+  assert.ok(nasiKandar.adjustedCompetitors >= nasiKandar.substituteCompetitors)
+  assert.notEqual(result.opportunities[0].slug, 'nasi_kandar')
+  assert.match(nasiKandar.riskFlags[0], /absence is not proof/i)
+})
+
+test('counts a multi-facet storefront once at its strongest substitute weight', () => {
+  const benchmark = {
+    ...input.benchmarks[0],
+    slug: 'nasi_kandar',
+    classifierTypes: ['nasi_kandar'],
+    marketProfile: {
+      competition: {
+        group: 'food',
+        broadWeight: 0,
+        substitutes: { mamak: 0.8, indian_restaurant: 0.65 },
+      },
+    },
+  }
+  const place = {
+    id: 'node/shared',
+    name: 'A single Indian-Muslim restaurant',
+    marketType: 'mamak',
+    marketTypeLabel: 'Mamak restaurant',
+    marketGroup: 'food',
+    marketFacets: ['indian_restaurant'],
+    specificity: 'specific',
+    tags: { amenity: 'restaurant', cuisine: 'indian' },
+  }
+  const opportunity = buildAnalysis({
+    ...input,
+    market: { ...input.market, places: [place] },
+    benchmarks: [benchmark],
+  }).opportunities[0]
+
+  assert.equal(opportunity.substituteCompetitors, 0.8)
+})
+
+test('uses spatial decay so nearby competitors exert more pressure than edge competitors', () => {
+  const makePlace = (id, lat) => ({
+    id,
+    name: `Ice cream ${id}`,
+    lat,
+    lng: 101,
+    marketType: 'ice_cream',
+    marketTypeLabel: 'Ice cream shop',
+    marketGroup: 'food',
+    marketFacets: [],
+    specificity: 'specific',
+    tags: { shop: 'ice_cream' },
+  })
+  const shared = {
+    ...input,
+    statistics: { ...input.statistics, population: 1000 },
+    location: { ...input.location, lat: 3, lng: 101 },
+    radiusKm: 5,
+  }
+  const nearby = buildAnalysis({
+    ...shared,
+    market: { ...input.market, places: [makePlace('near-1', 3.002), makePlace('near-2', 3.004)] },
+  }).opportunities[0]
+  const edge = buildAnalysis({
+    ...shared,
+    market: { ...input.market, places: [makePlace('edge-1', 3.04), makePlace('edge-2', 3.042)] },
+  }).opportunities[0]
+
+  assert.ok(nearby.adjustedCompetitors > edge.adjustedCompetitors)
+  assert.ok(nearby.fairShareSalesRm < edge.fairShareSalesRm)
+})
+
 test('does not label a single niche match as medium or high confidence', () => {
   const places = [
     ...Array.from({ length: 100 }, (_, index) => ({
@@ -354,7 +501,7 @@ test('uses category-specific age profiles instead of one generic demographic fac
   assert.match(childHeavy.demographicSignals[0], /children and family demand/)
 })
 
-test('uses ethnicity only as a modest cuisine-affinity signal', () => {
+test('does not turn ethnicity into presumed cuisine demand', () => {
   const benchmark = {
     ...input.benchmarks[0],
     slug: 'chinese_restaurant',
@@ -384,9 +531,10 @@ test('uses ethnicity only as a modest cuisine-affinity signal', () => {
     },
   }).opportunities[0]
 
-  assert.ok(higherAffinity.demandFactors.cultural > lowerAffinity.demandFactors.cultural)
-  assert.ok(higherAffinity.demandFactors.cultural <= 1.15)
-  assert.ok(lowerAffinity.demandFactors.cultural >= 0.85)
+  assert.equal(higherAffinity.demandFactors.cultural, 1)
+  assert.equal(lowerAffinity.demandFactors.cultural, 1)
+  assert.equal(higherAffinity.potentialDemandRm, lowerAffinity.potentialDemandRm)
+  assert.match(higherAffinity.demographicSignals[0], /not converted into presumed customer demand/i)
 })
 
 test('does not infer religion from ethnicity for pork or non-halal concepts', () => {

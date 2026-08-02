@@ -40,7 +40,125 @@ app.get('/api/health', async (_request, response) => {
     malaysiaOpenData: 'configured',
     googleMaps: process.env.VITE_GOOGLE_MAPS_EMBED_API_KEY ? 'embed-configured' : 'embed-key-required',
     openMarketData: 'openstreetmap-with-postgres-cache',
+    outcomeCalibration: process.env.OUTCOME_INGEST_TOKEN ? 'private-ingest-configured' : 'not-configured',
   })
+})
+
+const businessOutcomeInput = z.object({
+  externalStoreId: z.string().trim().min(3).max(200),
+  categorySlug: z.string().trim().regex(/^[a-z0-9_]{2,80}$/),
+  state: z.string().trim().max(100).optional(),
+  district: z.string().trim().max(120).optional(),
+  lat: z.coerce.number().min(0.8).max(7.6),
+  lng: z.coerce.number().min(99.5).max(119.5),
+  openedOn: z.string().date().optional(),
+  closedOn: z.string().date().optional(),
+  observationMonth: z.string().regex(/^\d{4}-\d{2}-01$/),
+  monthlySalesRm: z.coerce.number().min(0).max(1_000_000_000).optional(),
+  monthlyTransactions: z.coerce.number().int().min(0).max(100_000_000).optional(),
+  averageTicketRm: z.coerce.number().min(0).max(1_000_000).optional(),
+  grossMargin: z.coerce.number().gt(0).max(1).optional(),
+  monthlyRentRm: z.coerce.number().min(0).max(10_000_000).optional(),
+  monthlyPayrollRm: z.coerce.number().min(0).max(100_000_000).optional(),
+  otherMonthlyFixedCostsRm: z.coerce.number().min(0).max(100_000_000).optional(),
+  floorAreaSqm: z.coerce.number().gt(0).max(1_000_000).optional(),
+  weeklyOpenHours: z.coerce.number().min(0).max(168).optional(),
+  chainStore: z.boolean().optional(),
+  sourceType: z.enum(['opt-in-pos', 'accounting-partner', 'owner-submission', 'licensed-register']),
+  consentBasis: z.string().trim().min(3).max(300),
+  metadata: z.record(z.unknown()).optional().default({}),
+}).refine(
+  (value) => value.monthlySalesRm !== undefined || value.monthlyTransactions !== undefined || value.closedOn,
+  { message: 'Provide sales, transactions, or a closure outcome' },
+)
+
+function validBearerToken(request, expectedToken) {
+  const supplied = request.get('authorization')?.replace(/^Bearer\s+/i, '') || ''
+  const suppliedBytes = Buffer.from(supplied)
+  const expectedBytes = Buffer.from(expectedToken || '')
+  return suppliedBytes.length > 0
+    && suppliedBytes.length === expectedBytes.length
+    && crypto.timingSafeEqual(suppliedBytes, expectedBytes)
+}
+
+app.post('/api/model/outcomes', async (request, response, next) => {
+  try {
+    const ingestToken = process.env.OUTCOME_INGEST_TOKEN
+    if (!ingestToken) return response.status(503).json({ error: 'Private outcome ingestion is not configured' })
+    if (!validBearerToken(request, ingestToken)) return response.status(401).json({ error: 'Unauthorized' })
+    if (!database.pool) return response.status(503).json({ error: 'Database is not configured' })
+
+    const input = businessOutcomeInput.parse(request.body)
+    const category = await database.query(
+      'SELECT slug FROM business_benchmarks WHERE slug = $1',
+      [input.categorySlug],
+    )
+    if (!category.rows.length) return response.status(400).json({ error: 'Unknown benchmark category' })
+    const externalRefHash = crypto
+      .createHmac('sha256', ingestToken)
+      .update(input.externalStoreId)
+      .digest('hex')
+    await database.query(`
+      INSERT INTO business_outcomes (
+        external_ref_hash, category_slug, state, district, latitude, longitude,
+        opened_on, closed_on, observation_month, monthly_sales_rm,
+        monthly_transactions, average_ticket_rm, gross_margin, monthly_rent_rm,
+        monthly_payroll_rm, other_monthly_fixed_costs_rm, floor_area_sqm,
+        weekly_open_hours, chain_store, source_type, consent_basis, metadata
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+      )
+      ON CONFLICT (external_ref_hash, category_slug, observation_month)
+      DO UPDATE SET
+        state = EXCLUDED.state,
+        district = EXCLUDED.district,
+        latitude = EXCLUDED.latitude,
+        longitude = EXCLUDED.longitude,
+        opened_on = EXCLUDED.opened_on,
+        closed_on = EXCLUDED.closed_on,
+        monthly_sales_rm = EXCLUDED.monthly_sales_rm,
+        monthly_transactions = EXCLUDED.monthly_transactions,
+        average_ticket_rm = EXCLUDED.average_ticket_rm,
+        gross_margin = EXCLUDED.gross_margin,
+        monthly_rent_rm = EXCLUDED.monthly_rent_rm,
+        monthly_payroll_rm = EXCLUDED.monthly_payroll_rm,
+        other_monthly_fixed_costs_rm = EXCLUDED.other_monthly_fixed_costs_rm,
+        floor_area_sqm = EXCLUDED.floor_area_sqm,
+        weekly_open_hours = EXCLUDED.weekly_open_hours,
+        chain_store = EXCLUDED.chain_store,
+        source_type = EXCLUDED.source_type,
+        consent_basis = EXCLUDED.consent_basis,
+        metadata = EXCLUDED.metadata,
+        updated_at = NOW()
+    `, [
+      externalRefHash,
+      input.categorySlug,
+      input.state || null,
+      input.district || null,
+      input.lat,
+      input.lng,
+      input.openedOn || null,
+      input.closedOn || null,
+      input.observationMonth,
+      input.monthlySalesRm ?? null,
+      input.monthlyTransactions ?? null,
+      input.averageTicketRm ?? null,
+      input.grossMargin ?? null,
+      input.monthlyRentRm ?? null,
+      input.monthlyPayrollRm ?? null,
+      input.otherMonthlyFixedCostsRm ?? null,
+      input.floorAreaSqm ?? null,
+      input.weeklyOpenHours ?? null,
+      input.chainStore ?? null,
+      input.sourceType,
+      input.consentBasis,
+      input.metadata,
+    ])
+    response.status(201).json({ status: 'accepted', persisted: 'consented-outcome-only' })
+  } catch (error) {
+    next(error)
+  }
 })
 
 const analysisInput = z.object({

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   chooseBestLocationResult,
+  getBroadLocationDefault,
   isMalaysianLocationResult,
   MalaysiaLocationError,
 } from './location.js'
@@ -27,4 +28,13 @@ test('accepts only geocoder results explicitly located in Malaysia', () => {
   assert.equal(isMalaysianLocationResult({ display_name: 'Malaysia-themed shop, London' }), false)
   assert.equal(new MalaysiaLocationError().statusCode, 400)
   assert.equal(new MalaysiaLocationError().code, 'MALAYSIA_ONLY')
+})
+
+test('centres a state-only Penang search on a valid DOSM district', () => {
+  const location = getBroadLocationDefault('Pulau Pinang, Malaysia')
+  assert.equal(location.name, 'George Town')
+  assert.equal(location.district, 'Timur Laut')
+  assert.equal(location.state, 'Pulau Pinang')
+  assert.equal(location.approximate, true)
+  assert.equal(getBroadLocationDefault('Bayan Lepas, Pulau Pinang'), null)
 })

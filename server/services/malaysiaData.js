@@ -1,6 +1,7 @@
 import { parse } from 'csv-parse/sync'
 import * as database from '../db.js'
 import { runInBackground, singleFlight, TtlLruCache } from './runtimeCache.js'
+import { canonicalizeGovernmentArea as canonicalizeArea } from './governmentAreas.js'
 
 const API_BASE = 'https://api.data.gov.my/data-catalogue'
 const POPULATION_CSV = 'https://storage.dosm.gov.my/population/population_district.csv'
@@ -49,39 +50,8 @@ const nationalDemographicFallback = {
   citizenshipShares: { citizen: 0.91, nonCitizen: 0.09 },
 }
 
-const federalTerritoryAliases = new Map([
-  ['kuala lumpur', 'W.P. Kuala Lumpur'],
-  ['wp kuala lumpur', 'W.P. Kuala Lumpur'],
-  ['w p kuala lumpur', 'W.P. Kuala Lumpur'],
-  ['wilayah persekutuan kuala lumpur', 'W.P. Kuala Lumpur'],
-  ['federal territory of kuala lumpur', 'W.P. Kuala Lumpur'],
-  ['putrajaya', 'W.P. Putrajaya'],
-  ['wp putrajaya', 'W.P. Putrajaya'],
-  ['w p putrajaya', 'W.P. Putrajaya'],
-  ['wilayah persekutuan putrajaya', 'W.P. Putrajaya'],
-  ['federal territory of putrajaya', 'W.P. Putrajaya'],
-  ['labuan', 'W.P. Labuan'],
-  ['wp labuan', 'W.P. Labuan'],
-  ['w p labuan', 'W.P. Labuan'],
-  ['wilayah persekutuan labuan', 'W.P. Labuan'],
-  ['federal territory of labuan', 'W.P. Labuan'],
-])
-
-const normalizeAreaLabel = (value = '') => String(value)
-  .toLowerCase()
-  .replace(/[^a-z0-9]+/g, ' ')
-  .trim()
-
 export function canonicalizeGovernmentArea(location) {
-  const districtAlias = federalTerritoryAliases.get(normalizeAreaLabel(location.district))
-  const stateAlias = federalTerritoryAliases.get(normalizeAreaLabel(location.state))
-  const federalTerritory = districtAlias || stateAlias
-  if (!federalTerritory) return location
-  return {
-    ...location,
-    district: federalTerritory,
-    state: federalTerritory,
-  }
+  return canonicalizeArea(location)
 }
 
 async function readStoredStatistic(datasetId, district, state = '') {

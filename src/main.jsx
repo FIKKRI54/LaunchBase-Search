@@ -901,8 +901,17 @@ function AnalysisWorkspace({ analysis, loading, error, onScan, locale }) {
       'Promising, validate locally': 'Berpotensi, sahkan secara tempatan',
       'Conditional opportunity': 'Peluang bersyarat',
       'Weak current fit': 'Kesesuaian semasa lemah',
+      'Insufficient evidence': 'Bukti tidak mencukupi',
     }[value] || value)
     : value
+  const evidenceTierLabel = (tier) => locale === 'ms'
+    ? ({
+      'Estimated only': 'Anggaran sahaja',
+      'Public evidence screening': 'Saringan bukti awam',
+      'Historically calibrated': 'Dikalibrasi dengan sejarah',
+      'Locally tested': 'Diuji secara tempatan',
+    }[tier?.label] || tier?.label)
+    : tier?.label
 
   const downloadPdf = async () => {
     if (!analysis || pdfLoading || pdfDownloaded) return
@@ -1018,7 +1027,7 @@ function AnalysisWorkspace({ analysis, loading, error, onScan, locale }) {
                     <p className="text-sm font-semibold">{t('districtProfile')}</p>
                     <p className="mt-1 text-xs text-foreground/55">{t('districtProfileCopy')}</p>
                   </div>
-                  <p className="max-w-lg text-[11px] leading-5 text-foreground/45">{locale === 'ms' ? 'Etnik hanya digunakan sebagai isyarat kecil kecenderungan masakan dan tidak pernah dianggap sebagai pengganti agama.' : analysis.dataQuality.demographicProfile.note}</p>
+                  <p className="max-w-lg text-[11px] leading-5 text-foreground/45">{locale === 'ms' ? 'Etnik dipaparkan sebagai konteks agregat rasmi tetapi tidak ditukar kepada andaian permintaan pelanggan atau dianggap sebagai pengganti agama.' : analysis.dataQuality.demographicProfile.note}</p>
                 </div>
                 <div className="mt-4 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
                   {[
@@ -1038,8 +1047,34 @@ function AnalysisWorkspace({ analysis, loading, error, onScan, locale }) {
               </div>
             )}
 
+            <div className={`mt-5 rounded-2xl border p-5 ${
+              analysis.recommendationSummary?.status === 'insufficient-evidence'
+                ? 'border-orange-500/25 bg-orange-500/10'
+                : 'border-foreground/10 bg-surface'
+            }`}>
+              <div className="flex items-start gap-3">
+                <Icon
+                  icon={analysis.recommendationSummary?.status === 'insufficient-evidence' ? 'solar:danger-triangle-bold' : 'solar:shield-check-linear'}
+                  width={20}
+                  className={analysis.recommendationSummary?.status === 'insufficient-evidence' ? 'text-orange-500' : 'text-accent'}
+                />
+                <div>
+                  <p className="text-sm font-semibold">
+                    {analysis.recommendationSummary?.status === 'insufficient-evidence' ? t('insufficientEvidence') : t('screeningOnly')}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-foreground/60">
+                    {locale === 'ms'
+                      ? analysis.recommendationSummary?.status === 'insufficient-evidence'
+                        ? 'Imbasan ini tidak mempunyai bukti kategori yang mencukupi untuk mengeluarkan cadangan berkedudukan.'
+                        : 'Kedudukan ini membandingkan data awam dan bukan kebarangkalian kejayaan yang telah dikalibrasi.'
+                      : analysis.recommendationSummary?.message}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="mt-12 flex items-end justify-between gap-5">
-              <div><p className="eyebrow">{t('rankingEyebrow')}</p><h3 className="mt-3 text-3xl font-medium tracking-[-.03em]">{t('rankingTitle')}</h3></div>
+              <div><p className="eyebrow">{t('rankingEyebrow')}</p><h3 className="mt-3 text-3xl font-medium tracking-[-.03em]">{analysis.recommendationSummary?.status === 'insufficient-evidence' ? t('insufficientRankingTitle') : t('rankingTitle')}</h3></div>
             </div>
             <div className="mt-6 grid gap-4 lg:grid-cols-3">
               {visibleOpportunities.map((item, index) => (
@@ -1047,7 +1082,7 @@ function AnalysisWorkspace({ analysis, loading, error, onScan, locale }) {
                   <div className="flex items-center justify-between">
                     <span className={`text-xs font-medium ${index === 0 ? 'text-contrast/60' : 'text-foreground/60'}`}>#{index + 1} · {confidenceLabel(item.confidenceLabel)}</span>
                     <span className="text-right">
-                      <span className={`block text-3xl font-semibold ${index === 0 ? '' : 'text-accent'}`}>{item.successScore}</span>
+                      <span className={`block text-3xl font-semibold ${index === 0 ? '' : 'text-accent'}`}>{item.recommendationDecision?.canRank === false ? '—' : item.planningScore ?? item.successScore}</span>
                       <span className={`mt-1 block text-[10px] font-medium ${index === 0 ? 'text-contrast/55' : 'text-foreground/50'}`}>{scoreBandLabel(item.scoreBand)}</span>
                     </span>
                   </div>
@@ -1055,6 +1090,7 @@ function AnalysisWorkspace({ analysis, loading, error, onScan, locale }) {
                   <p className={`mt-2 text-xs leading-5 ${index === 0 ? 'text-contrast/65' : 'text-foreground/60'}`}>{locale === 'ms' ? `Format ${opportunityName(item, locale).toLowerCase()} berskala kejiranan yang perlu disahkan mengikut lokasi.` : item.recommendedFormat}</p>
                   <dl className={`mt-5 space-y-3 border-t pt-5 text-sm ${index === 0 ? 'border-contrast/20' : 'border-foreground/10'}`}>
                     <ResultRow label={t('potentialDemand')} value={formatRinggit.format(item.potentialDemandRm)} dark={index === 0} />
+                    <ResultRow label={t('estimatedRevenueRange')} value={`${formatRinggit.format(item.fairShareRangeRm.low)}–${formatRinggit.format(item.fairShareRangeRm.high)}`} dark={index === 0} />
                     <ResultRow label={t('supportableStores')} value={item.supportableStores} dark={index === 0} />
                     <ResultRow label={item.competitorSource === 'live-openstreetmap' ? t('mappedBusinesses') : t('modelledCompetitors')} value={item.competitorCount} dark={index === 0} />
                     <ResultRow label={t('adjustedSupply')} value={item.adjustedCompetitors} dark={index === 0} />
@@ -1067,6 +1103,7 @@ function AnalysisWorkspace({ analysis, loading, error, onScan, locale }) {
                     </div>
                   )}
                   <div className={`mt-5 rounded-xl p-3 text-[11px] leading-5 ${index === 0 ? 'bg-contrast/10 text-contrast/70' : 'bg-foreground/[.035] text-foreground/55'}`}>
+                    <p><span className="font-semibold">{t('evidenceTier')}:</span> {evidenceTierLabel(item.evidenceTier)}</p>
                     <p className="font-semibold">{t('whyScore')}</p>
                     <p className="mt-1">{locale === 'ms' ? `${item.supportableStores} kedai penanda aras disokong · ${item.competitorCount} pesaing dipetakan · skor bukti ${analysis.dataQuality.marketEvidence.score}/100` : item.scoreExplanation.join(' · ')}</p>
                     {item.demographicSignals?.[0] && <p className="mt-2"><span className="font-semibold">{t('localFit')}</span> {locale === 'ms' ? 'Pelarasan demografi agregat khusus kategori telah digunakan.' : item.demographicSignals[0]}</p>}
@@ -1132,7 +1169,7 @@ function AreaMetric({ label, value, note }) {
 }
 
 function ResultRow({ label, value, dark }) {
-  return <div className="flex items-center justify-between gap-3"><dt className={dark ? 'text-contrast/60' : 'text-foreground/60'}>{label}</dt><dd className="font-medium">{value}</dd></div>
+  return <div className="flex items-start justify-between gap-3"><dt className={`min-w-0 ${dark ? 'text-contrast/60' : 'text-foreground/60'}`}>{label}</dt><dd className="max-w-[58%] text-right font-medium">{value}</dd></div>
 }
 
 function DetailedAnalysis({ analysis, locale }) {
@@ -1462,7 +1499,7 @@ function MarketSignalBanner({ analysis, primary, locale }) {
             </div>
             <div className="mt-5 flex items-end justify-between border-t border-white/15 pt-4">
               <span className="text-xs text-white/60">{t('opportunityIndex')}</span>
-              <span className="text-3xl font-semibold text-white">{primary?.successScore ?? '—'}</span>
+              <span className="text-3xl font-semibold text-white">{primary?.planningScore ?? primary?.successScore ?? '—'}</span>
             </div>
           </article>
         </div>
@@ -1473,7 +1510,9 @@ function MarketSignalBanner({ analysis, primary, locale }) {
 
 function OpportunitySection({ analysis, locale }) {
   const t = translator(locale)
-  const ideas = (analysis?.opportunities || []).slice(0, 3).map((idea) => ({
+  const ideas = (analysis?.opportunities || [])
+    .filter((idea) => idea.recommendationDecision?.canRank !== false)
+    .slice(0, 3).map((idea) => ({
     ...idea,
     icon: opportunityIcons[idea.slug] || 'solar:shop-linear',
   }))
@@ -1493,8 +1532,8 @@ function OpportunitySection({ analysis, locale }) {
         {!primary ? (
           <div className="mt-14 rounded-2xl border border-dashed border-foreground/15 bg-surface p-10 text-center">
             <Icon icon="solar:map-point-search-linear" width={34} className="text-accent" />
-            <p className="mt-4 font-medium">{t('noPrefill')}</p>
-            <p className="mt-2 text-sm text-foreground/60">{t('noPrefillCopy')}</p>
+            <p className="mt-4 font-medium">{analysis ? t('insufficientEvidence') : t('noPrefill')}</p>
+            <p className="mt-2 text-sm text-foreground/60">{analysis ? analysis.recommendationSummary?.message : t('noPrefillCopy')}</p>
           </div>
         ) : <div className="mt-14 grid gap-4 lg:grid-cols-[1.5fr_.85fr_.85fr]">
           <article className="opportunity-main group relative min-h-[430px] overflow-hidden rounded-2xl bg-signal p-7 text-contrast lg:p-9">
@@ -1504,7 +1543,7 @@ function OpportunitySection({ analysis, locale }) {
                 <p className="text-sm text-contrast/60">{analysis.location.name} · {primary.competitorSource === 'live-openstreetmap' ? t('liveSupply') : t('fallbackEstimate')}</p>
                 <h3 className="mt-3 max-w-lg text-4xl font-semibold tracking-[-.04em] md:text-5xl">{opportunityName(primary, locale)}</h3>
                 <div className="mt-7 grid grid-cols-3 gap-4 border-t border-contrast/20 pt-5">
-                  <Metric label={t('opportunityIndex')} value={primary.successScore} />
+                  <Metric label={t('opportunityIndex')} value={primary.planningScore ?? primary.successScore} />
                   <Metric label={t('supportableStores')} value={primary.supportableStores} />
                   <Metric label={primary.competitorSource === 'live-openstreetmap' ? t('mappedBusinesses') : t('estimatedRivals')} value={primary.competitorCount} />
                 </div>
@@ -1515,7 +1554,7 @@ function OpportunitySection({ analysis, locale }) {
           {secondary.map((idea, index) => (
             <article key={idea.slug} className="flex min-h-[300px] flex-col rounded-2xl border border-foreground/10 bg-surface p-7 transition duration-300 hover:-translate-y-1 hover:border-foreground/20 lg:min-h-[430px]">
               <div className="flex items-center justify-between"><span className="text-xs text-foreground/60">#{String(index + 2).padStart(2, '0')} {t('opportunity')}</span><Icon icon={idea.icon} width={27} className="text-accent" /></div>
-              <div className="mt-auto"><p className="text-xs text-foreground/65">{idea.competitorCount} {idea.competitorSource === 'live-openstreetmap' ? t('mappedBusinessPlural') : t('estimatedRivals')}</p><h3 className="mt-3 text-2xl font-medium">{opportunityName(idea, locale)}</h3><div className="mt-6 flex items-end justify-between border-t border-foreground/10 pt-5"><span className="text-xs text-foreground/60">{t('opportunityIndex')}</span><span className="text-3xl font-semibold">{idea.successScore}</span></div></div>
+              <div className="mt-auto"><p className="text-xs text-foreground/65">{idea.competitorCount} {idea.competitorSource === 'live-openstreetmap' ? t('mappedBusinessPlural') : t('estimatedRivals')}</p><h3 className="mt-3 text-2xl font-medium">{opportunityName(idea, locale)}</h3><div className="mt-6 flex items-end justify-between border-t border-foreground/10 pt-5"><span className="text-xs text-foreground/60">{t('opportunityIndex')}</span><span className="text-3xl font-semibold">{idea.planningScore ?? idea.successScore}</span></div></div>
             </article>
           ))}
         </div>}

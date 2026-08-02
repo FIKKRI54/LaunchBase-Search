@@ -57,6 +57,7 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
       'Promising, validate locally': 'Berpotensi, sahkan secara tempatan',
       'Conditional opportunity': 'Peluang bersyarat',
       'Weak current fit': 'Kesesuaian semasa lemah',
+      'Insufficient evidence': 'Bukti tidak mencukupi',
     }[value] || value)
     : value
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true })
@@ -138,13 +139,15 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
   section(locale === 'ms' ? 'Ringkasan eksekutif' : 'Executive summary')
   paragraph(
     locale === 'ms'
-      ? `Laporan ini membandingkan anggaran permintaan tempatan, bekalan perniagaan dipetakan, keadaan isi rumah dan kualiti bukti untuk ${text(analysis.location?.name)}. Skor ialah isyarat perancangan, bukan jaminan kejayaan.`
-      : `This report compares estimated local demand, mapped business supply, household conditions and evidence quality for ${text(analysis.location?.name)}. Scores are planning signals, not guarantees of success.`,
+      ? `Laporan ini membandingkan anggaran permintaan tempatan, bekalan perniagaan dipetakan, keadaan isi rumah dan kualiti bukti untuk ${text(analysis.location?.name)}. Skor perancangan bukan kebarangkalian kejayaan yang telah dikalibrasi.`
+      : `This report compares estimated local demand, mapped business supply, household conditions and evidence quality for ${text(analysis.location?.name)}. Planning scores are not calibrated probabilities of success.`,
     { size: 10, color: colors.ink, lineHeight: 5.2 },
   )
   paragraph(`${locale === 'ms' ? 'Nota data' : 'Data note'}: ${locale === 'ms' ? t(analysis.dataQuality?.supplyAvailable ? 'mappedSupplyAvailable' : 'mapSupplyUnavailable') : text(analysis.dataQuality?.marketEvidence?.note)}`, { size: 8 })
 
-  section(locale === 'ms' ? 'Kedudukan peluang' : 'Ranked opportunities')
+  section(analysis.recommendationSummary?.status === 'insufficient-evidence'
+    ? locale === 'ms' ? 'Idea yang memerlukan lebih banyak bukti' : 'Ideas requiring more evidence'
+    : locale === 'ms' ? 'Kedudukan peluang' : 'Ranked opportunities')
   ;(analysis.opportunities || []).forEach((item, index) => {
     const reason = locale === 'ms'
       ? `${text(item.supportableStores)} kedai penanda aras disokong; ${text(item.competitorCount)} pesaing diperhatikan; skor bukti ${text(analysis.dataQuality?.marketEvidence?.score)}/100.`
@@ -171,15 +174,15 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
     pdf.text(text(opportunityName(item, locale)), page.margin + 18, y + 10.8)
     const scoreX = page.width - page.margin - 6
     setText(18, index === 0 ? [151, 8, 38] : colors.ink, 'bold')
-    pdf.text(String(item.successScore), scoreX, y + 11, { align: 'right' })
+    pdf.text(item.recommendationDecision?.canRank === false ? '—' : String(item.planningScore ?? item.successScore), scoreX, y + 11, { align: 'right' })
     setText(7, colors.gray, 'normal')
     pdf.text(text(scoreBand(item.scoreBand)), scoreX, y + 16, { align: 'right' })
 
     setText(8, colors.gray, 'normal')
     pdf.text(
       locale === 'ms'
-        ? `Permintaan ${money.format(item.potentialDemandRm || 0)}  |  Boleh disokong ${text(item.supportableStores)}  |  Bekalan ${text(item.adjustedCompetitors)}  |  Bahagian saksama ${money.format(item.fairShareSalesRm || 0)}`
-        : `Demand ${money.format(item.potentialDemandRm || 0)}  |  Supportable ${text(item.supportableStores)}  |  Supply ${text(item.adjustedCompetitors)}  |  Fair share ${money.format(item.fairShareSalesRm || 0)}`,
+        ? `Permintaan ${money.format(item.potentialDemandRm || 0)}  |  Boleh disokong ${text(item.supportableStores)}  |  Bekalan ${text(item.adjustedCompetitors)}  |  Julat ${money.format(item.fairShareRangeRm?.low || 0)}–${money.format(item.fairShareRangeRm?.high || 0)}`
+        : `Demand ${money.format(item.potentialDemandRm || 0)}  |  Supportable ${text(item.supportableStores)}  |  Supply ${text(item.adjustedCompetitors)}  |  Range ${money.format(item.fairShareRangeRm?.low || 0)}–${money.format(item.fairShareRangeRm?.high || 0)}`,
       page.margin + 5,
       y + 22,
     )
@@ -230,6 +233,7 @@ export async function createAnalysisPdf(analysis, locale = 'en') {
   paragraph(methodology?.demand)
   paragraph(methodology?.competitorEstimate)
   paragraph(methodology?.demographicFit)
+  if (methodology?.validation) paragraph(methodology.validation)
   paragraph(methodology?.disclaimer, { color: [151, 8, 38], style: 'bold' })
   ;(analysis.sources || []).forEach((source) => paragraph(`${source.name}: ${source.url}`, { size: 7.5, gap: 1.5, lineHeight: 4 }))
 

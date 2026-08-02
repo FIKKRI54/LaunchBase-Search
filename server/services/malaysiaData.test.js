@@ -25,6 +25,27 @@ test('canonicalizes federal-territory labels used by geocoders to DOSM labels', 
   )
 })
 
+test('canonicalizes English Penang district names used by geocoders to DOSM labels', () => {
+  const cases = [
+    ['North-East', 'Timur Laut'],
+    ['Northeast Penang Island District', 'Timur Laut'],
+    ['South-West', 'Barat Daya'],
+    ['Southwest Penang Island District', 'Barat Daya'],
+    ['North Seberang Perai District', 'Seberang Perai Utara'],
+    ['Central Seberang Perai District', 'Seberang Perai Tengah'],
+    ['South Seberang Perai District', 'Seberang Perai Selatan'],
+    ['George Town', 'Timur Laut'],
+    ['Butterworth', 'Seberang Perai Utara'],
+  ]
+
+  for (const [district, expected] of cases) {
+    assert.deepEqual(
+      canonicalizeGovernmentArea({ district, state: 'Penang' }),
+      { district: expected, state: 'Pulau Pinang' },
+    )
+  }
+})
+
 test('summarizes official age, sex, citizenship and ethnicity rows for a district', () => {
   const base = { state: 'Test State', district: 'Profile District', date: '2025-01-01' }
   const rows = [

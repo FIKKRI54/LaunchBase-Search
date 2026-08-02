@@ -1,5 +1,9 @@
 import * as database from '../db.js'
 import { readExternalCache, writeExternalCache } from './externalCache.js'
+import {
+  canonicalizeGovernmentArea,
+  isKnownGovernmentDistrict,
+} from './governmentAreas.js'
 import { runInBackground, singleFlight, TtlLruCache } from './runtimeCache.js'
 
 const NOMINATIM_URL = process.env.NOMINATIM_URL || 'https://nominatim.openstreetmap.org/search'
@@ -28,17 +32,6 @@ const knownLocations = [
   { terms: ['kuching'], name: 'Kuching', district: 'Kuching', state: 'Sarawak', lat: 1.5533, lng: 110.3592 },
 ]
 
-const stateAliases = {
-  'federal territory of kuala lumpur': 'W.P. Kuala Lumpur',
-  'wilayah persekutuan kuala lumpur': 'W.P. Kuala Lumpur',
-  'kuala lumpur': 'W.P. Kuala Lumpur',
-  'federal territory of putrajaya': 'W.P. Putrajaya',
-  'wilayah persekutuan putrajaya': 'W.P. Putrajaya',
-  putrajaya: 'W.P. Putrajaya',
-  'federal territory of labuan': 'W.P. Labuan',
-  'wilayah persekutuan labuan': 'W.P. Labuan',
-  penang: 'Pulau Pinang',
-}
 const malaysiaStates = [
   'Johor', 'Kedah', 'Kelantan', 'Melaka', 'Negeri Sembilan', 'Pahang',
   'Perak', 'Perlis', 'Pulau Pinang', 'Penang', 'Sabah', 'Sarawak',
@@ -67,7 +60,7 @@ function scheduleNominatimRequest(task) {
 }
 
 async function matchGovernmentDistrict(address, rawState) {
-  const state = stateAliases[normalize(rawState)] || rawState
+  const state = canonicalizeGovernmentArea({ district: '', state: rawState }).state
   const candidates = [
     address.city_district,
     address.district,
@@ -76,6 +69,9 @@ async function matchGovernmentDistrict(address, rawState) {
     address.city,
     address.town,
   ].filter(Boolean)
+  const canonicalCandidates = candidates.map((district) =>
+    canonicalizeGovernmentArea({ district, state }),
+  )
 
   const districtCacheKey = normalize(state) || 'all'
   let districts = districtCache.get(districtCacheKey)?.rows
@@ -93,13 +89,20 @@ async function matchGovernmentDistrict(address, rawState) {
       expiresAt: Date.now() + 60 * 60 * 1000,
     })
   }
-  for (const candidate of candidates) {
-    const normalizedCandidate = normalize(candidate)
+  for (const candidate of canonicalCandidates) {
+    const normalizedCandidate = normalize(candidate.district)
     const exact = districts.find((row) => normalize(row.district) === normalizedCandidate)
     if (exact) return exact
   }
-  for (const candidate of candidates) {
-    const normalizedCandidate = normalize(candidate)
+
+  // English Penang geocoder labels do not match DOSM's Malay district labels.
+  // Resolve an authoritative alias before fuzzy matching, including when this
+  // is the first scan and the database has not cached the DOSM snapshot yet.
+  const knownCandidate = canonicalCandidates.find(isKnownGovernmentDistrict)
+  if (knownCandidate) return knownCandidate
+
+  for (const candidate of canonicalCandidates) {
+    const normalizedCandidate = normalize(candidate.district)
     const partial = districts.find((row) => {
       const district = normalize(row.district)
       return district.includes(normalizedCandidate) || normalizedCandidate.includes(district)
@@ -107,10 +110,7 @@ async function matchGovernmentDistrict(address, rawState) {
     if (partial) return partial
   }
 
-  return {
-    district: candidates[0] || state,
-    state,
-  }
+  return canonicalCandidates[0] || canonicalizeGovernmentArea({ district: state, state })
 }
 
 function withStateSeparator(searchQuery) {
@@ -161,6 +161,26 @@ export function chooseBestLocationResult(results, searchQuery) {
 
 export function isMalaysianLocationResult(result) {
   return String(result?.address?.country_code || result?.country_code || '').toLowerCase() === 'my'
+}
+
+export function getBroadLocationDefault(searchQuery) {
+  const broadQuery = normalize(searchQuery)
+    .replace(/\bmalaysia\b/g, '')
+    .replace(/\bstate\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (broadQuery !== 'penang' && broadQuery !== 'pulau pinang') return null
+
+  const georgeTown = knownLocations.find((location) => location.name === 'George Town')
+  return {
+    ...georgeTown,
+    formattedAddress: 'George Town, Timur Laut, Pulau Pinang, Malaysia',
+    countryCode: 'my',
+    provider: 'local-region-default',
+    approximate: true,
+    cacheStatus: 'regional-centre-default',
+    warning: 'Pulau Pinang is a state, so this scan is centred on George Town. Click the map to choose a more exact area.',
+  }
 }
 
 async function locationFromReverseResult(result, fallbackName) {
@@ -248,8 +268,11 @@ async function geocodeMalaysia(searchQuery) {
 }
 
 export async function resolveLocation(searchQuery) {
+  const broadLocationDefault = getBroadLocationDefault(searchQuery)
+  if (broadLocationDefault) return broadLocationDefault
+
   const normalizedQuery = normalize(searchQuery)
-  const cacheKey = `geocode:v4:my:${normalizedQuery}`
+  const cacheKey = `geocode:v6:my:${normalizedQuery}`
   const cached = await readExternalCache(cacheKey, { allowExpired: true })
   if (cached?.fresh) return { ...cached.payload, cacheStatus: 'database-hit' }
 
@@ -307,7 +330,7 @@ export async function resolveCoordinates(lat, lng) {
 
   const roundedLat = latitude.toFixed(5)
   const roundedLng = longitude.toFixed(5)
-  const cacheKey = `reverse-geocode:v1:my:${roundedLat}:${roundedLng}`
+  const cacheKey = `reverse-geocode:v3:my:${roundedLat}:${roundedLng}`
   const cached = await readExternalCache(cacheKey, { allowExpired: true })
   if (cached?.fresh) return { ...cached.payload, cacheStatus: 'database-hit' }
 

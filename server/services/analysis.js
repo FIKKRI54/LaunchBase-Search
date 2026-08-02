@@ -1,4 +1,10 @@
 import { matchesMarketTags } from './openMarket.js'
+import {
+  evidenceTier,
+  predictionRange,
+  recommendationDecision,
+  spatialSupplyWeight,
+} from './recommendationModel.js'
 
 const clamp = (value, minimum, maximum) => Math.min(Math.max(value, minimum), maximum)
 const money = (value) => Math.round(value)
@@ -172,6 +178,82 @@ function recommendationFormat(benchmark, statistics) {
   return `${incomePosition} ${base.charAt(0).toLowerCase()}${base.slice(1)}`
 }
 
+function uniquePlacesForTypes(placesByType, types) {
+  return [...new Map(
+    types
+      .flatMap((type) => placesByType.get(type) || [])
+      .map((place) => [place.id, place]),
+  ).values()]
+}
+
+function competitiveSupplyFor({ benchmark, direct, market, placesByType, location, radiusKm }) {
+  const configuration = benchmark.marketProfile?.competition || {}
+  const directIds = new Set(direct.map((place) => place.id))
+  const weightedByPlace = new Map()
+  const substituteCounts = {}
+  const spatialOptions = { center: location, radiusKm }
+  const directEquivalent = direct.reduce(
+    (sum, place) => sum + spatialSupplyWeight(place, { ...spatialOptions, similarity: 1 }).equivalent,
+    0,
+  )
+
+  for (const [type, rawWeight] of Object.entries(configuration.substitutes || {})) {
+    const weight = clamp(Number(rawWeight) || 0, 0, 1)
+    if (!weight) continue
+    for (const place of placesByType.get(type) || []) {
+      if (directIds.has(place.id)) continue
+      const previous = weightedByPlace.get(place.id)
+      if (!previous || weight > previous.weight) {
+        weightedByPlace.set(place.id, { place, weight, type, source: 'substitute' })
+      }
+    }
+  }
+
+  for (const { type } of weightedByPlace.values()) {
+    substituteCounts[type] = (substituteCounts[type] || 0) + 1
+  }
+
+  const broadWeight = clamp(Number(configuration.broadWeight) || 0, 0, 0.1)
+  if (configuration.group && broadWeight) {
+    for (const place of market.places) {
+      if (
+        directIds.has(place.id)
+        || weightedByPlace.has(place.id)
+        || place.marketGroup !== configuration.group
+      ) continue
+      weightedByPlace.set(place.id, {
+        place,
+        weight: broadWeight,
+        type: place.marketType,
+        source: 'same-market',
+      })
+    }
+  }
+
+  const substituteEquivalent = [...weightedByPlace.values()].reduce(
+    (sum, item) => sum + spatialSupplyWeight(
+      item.place,
+      { ...spatialOptions, similarity: item.weight },
+    ).equivalent,
+    0,
+  )
+  const closeSubstituteEquivalent = [...weightedByPlace.values()]
+    .filter((item) => item.source === 'substitute')
+    .reduce((sum, item) => sum + spatialSupplyWeight(
+      item.place,
+      { ...spatialOptions, similarity: item.weight },
+    ).equivalent, 0)
+  const broadEquivalent = substituteEquivalent - closeSubstituteEquivalent
+
+  return {
+    equivalent: directEquivalent + substituteEquivalent,
+    directEquivalent,
+    closeSubstituteEquivalent,
+    broadEquivalent,
+    substituteCounts,
+  }
+}
+
 function evaluateAudienceFit(benchmark, statistics) {
   const genericFactor = clamp(0.8 + statistics.workingAgeShare * 0.35, 0.85, 1.1)
   const audience = benchmark.marketProfile?.audience || {}
@@ -242,13 +324,8 @@ export function evaluateCulturalFit({ benchmark, statistics, market }) {
       (sum, key) => sum + Number(statistics.ethnicityShares?.[key] || 0),
       0,
     )
-    factor = clamp(
-      1 + (actual - Number(affinity.baseline || 0)) * Number(affinity.weight || 0),
-      0.85,
-      1.15,
-    )
     signals.push(
-      `${Math.round(actual * 100)}% district population share is associated with ${affinity.label || 'this cuisine'}; this is only a modest cuisine-affinity signal`,
+      `${Math.round(actual * 100)}% is the relevant aggregate population profile, but it is not converted into presumed customer demand; observed purchasing or local tests are required`,
     )
   }
 
@@ -379,12 +456,16 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
       * benchmark.captureRate
     const supportableStores = potentialDemand / benchmark.averageStoreSalesRm
     const observed = benchmark.classifierTypes?.length
-      ? [...new Map(
-        benchmark.classifierTypes
-          .flatMap((classifierType) => placesByType.get(classifierType) || [])
-          .map((place) => [place.id, place]),
-      ).values()]
+      ? uniquePlacesForTypes(placesByType, benchmark.classifierTypes)
       : market.places.filter((place) => matchesMarketTags(place.tags, benchmark.osmTags))
+    const competitiveSupply = competitiveSupplyFor({
+      benchmark,
+      direct: observed,
+      market,
+      placesByType,
+      location,
+      radiusKm,
+    })
     const hasLiveMarket = market.provider === 'openstreetmap-overpass'
     const modelledCompetitors = Math.max(
       0,
@@ -392,7 +473,7 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
     )
     const baselineFloor = modelledCompetitors * (1 - marketEvidence.coverageFactor * 0.65)
     const adjustedCompetitors = hasLiveMarket
-      ? Math.max(observed.length, baselineFloor)
+      ? Math.max(competitiveSupply.equivalent, baselineFloor)
       : modelledCompetitors
     const competitorCount = hasLiveMarket ? observed.length : Math.round(modelledCompetitors)
     const fairShareSales = potentialDemand / (adjustedCompetitors + 1)
@@ -419,15 +500,43 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
     )
     const uncertaintyPenalty = categoryConfidence === 'low' ? 10 : categoryConfidence === 'medium' ? 4 : 0
     const confidenceCap = categoryConfidence === 'low' ? 68 : categoryConfidence === 'medium' ? 80 : 88
-    const evidenceAdjustedScore = clamp(rawScore - uncertaintyPenalty, 5, confidenceCap)
+    const directEvidencePenalty = hasLiveMarket && marketEvidence.level !== 'low'
+      ? observed.length === 0 ? 10 : observed.length === 1 ? 4 : 0
+      : 0
+    const evidenceAdjustedScore = clamp(
+      rawScore - uncertaintyPenalty - directEvidencePenalty,
+      5,
+      confidenceCap,
+    )
     const rankingScore = culturalFit.eligibleForRecommendation
       ? evidenceAdjustedScore
       : Math.min(evidenceAdjustedScore, 25)
-    const successScore = Math.round(rankingScore)
+    const planningScore = Math.round(rankingScore)
     const adjustedCompetitorCount = oneDecimal(adjustedCompetitors)
+    const validation = benchmark.validation || { status: 'not-validated', sampleSize: 0 }
+    const tier = evidenceTier({
+      validation,
+      localOutcomeCount: Number(benchmark.localOutcomeCount || 0),
+      marketEvidence,
+      directCount: observed.length,
+    })
+    const decision = recommendationDecision({
+      supplyAvailable: hasLiveMarket,
+      marketEvidence,
+      directCount: observed.length,
+      culturalEligibility: culturalFit.eligibleForRecommendation,
+      validation,
+    })
+    const revenueRange = predictionRange({
+      demand: potentialDemand,
+      adjustedSupply: adjustedCompetitors,
+      marketEvidence,
+      historicallyValidated: validation.status === 'passed',
+      spatialPopulationIsEstimated: true,
+    })
     const riskFlags = [
       ...(observed.length === 0 && hasLiveMarket
-        ? ['No directly mapped competitor was found; this is missing-evidence risk, not proof of an empty market.']
+        ? ['No directly mapped example was found; the niche is penalized because absence is not proof of unmet demand.']
         : []),
       ...(observed.length > 0 && observed.length < 3 && hasLiveMarket
         ? [`Only ${observed.length} directly mapped competitor${observed.length === 1 ? ' was' : 's were'} found; niche-level supply evidence is thin.`]
@@ -447,19 +556,31 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
       name: benchmark.name,
       placeType: benchmark.googlePlaceType,
       marketTypes: benchmark.classifierTypes || [],
-      successScore,
+      planningScore,
+      // Backward-compatible alias for older clients. This value is a planning
+      // score and is never a probability of business success.
+      successScore: planningScore,
       rankingScore: Number(rankingScore.toFixed(2)),
-      scoreBand: successScore >= 75
-        ? 'Strong candidate to validate'
-        : successScore >= 60 ? 'Promising, validate locally' : successScore >= 45 ? 'Conditional opportunity' : 'Weak current fit',
-      scoreLabel: 'Opportunity index',
+      scoreBand: !decision.canRank
+        ? 'Insufficient evidence'
+        : planningScore >= 75
+          ? 'Strong candidate to validate'
+          : planningScore >= 60 ? 'Promising, validate locally' : planningScore >= 45 ? 'Conditional opportunity' : 'Weak current fit',
+      scoreLabel: 'Planning score',
       confidence: categoryConfidence,
       confidenceLabel: `${categoryConfidence[0].toUpperCase()}${categoryConfidence.slice(1)} evidence`,
       eligibleForRecommendation: culturalFit.eligibleForRecommendation,
       eligibilityStatus: culturalFit.status,
+      recommendationDecision: decision,
+      evidenceTier: tier,
+      validation,
+      outcomeCoverage: benchmark.outcomeCoverage || { observationCount: 0, storeCount: 0 },
       recommendedFormat: recommendationFormat(benchmark, statistics),
       potentialDemandRm: money(potentialDemand),
       fairShareSalesRm: money(fairShareSales),
+      demandRangeRm: { low: revenueRange.demandLowRm, high: revenueRange.demandHighRm },
+      fairShareRangeRm: { low: revenueRange.fairShareLowRm, high: revenueRange.fairShareHighRm },
+      uncertainty: revenueRange,
       unmetDemandRm: money(unmetDemand),
       supportableStores: Number(supportableStores.toFixed(1)),
       competitorCount,
@@ -468,8 +589,11 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
       observedCompetitors: hasLiveMarket ? competitorCount : null,
       estimatedCompetitors: oneDecimal(modelledCompetitors),
       competitorBasis: hasLiveMarket
-        ? `${competitorCount} directly mapped; ${adjustedCompetitorCount} used after the market-coverage baseline`
+        ? `${competitorCount} directly mapped (${oneDecimal(competitiveSupply.directEquivalent)} distance-weighted equivalents); ${oneDecimal(competitiveSupply.closeSubstituteEquivalent)} close-substitute equivalents; ${oneDecimal(competitiveSupply.broadEquivalent)} wider-market equivalents; ${adjustedCompetitorCount} used after the coverage baseline`
         : `${benchmark.estimatedStoresPer100k} modelled stores per 100,000 residents`,
+      substituteCompetitors: oneDecimal(competitiveSupply.closeSubstituteEquivalent),
+      widerMarketCompetitors: oneDecimal(competitiveSupply.broadEquivalent),
+      substituteCounts: competitiveSupply.substituteCounts,
       specificMarketTypes: [...new Set(observed.map((place) => place.marketTypeLabel))],
       businessExamples: observed
         .filter((place) => place.name !== 'Unnamed mapped business')
@@ -504,7 +628,7 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
       },
       scoreExplanation: [
         `${Number(supportableStores.toFixed(1))} benchmark stores supported by estimated category demand`,
-        `${competitorCount} directly mapped and ${adjustedCompetitorCount} competitors used after coverage adjustment`,
+        `${competitorCount} direct, ${oneDecimal(competitiveSupply.closeSubstituteEquivalent)} close-substitute and ${oneDecimal(competitiveSupply.broadEquivalent)} wider-market competitor equivalents`,
         `${marketEvidence.level} mapped-market evidence (${marketEvidence.score}/100 evidence score)`,
       ],
       riskFlags,
@@ -514,12 +638,31 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
         averageStoreSalesRm: benchmark.averageStoreSalesRm,
         incomeFactor: Number(incomeFactor.toFixed(2)),
         estimatedStoresPer100k: benchmark.estimatedStoresPer100k,
+        provenance: validation.status === 'passed' ? 'historically-validated' : 'starter-planning-assumption',
       },
     }
   }).sort((a, b) =>
-    Number(b.eligibleForRecommendation) - Number(a.eligibleForRecommendation)
+    Number(b.recommendationDecision.canRank) - Number(a.recommendationDecision.canRank)
+    || Number(b.eligibleForRecommendation) - Number(a.eligibleForRecommendation)
     || b.rankingScore - a.rankingScore,
   )
+
+  const rankableOpportunities = opportunities.filter((item) => item.recommendationDecision.canRank)
+  const recommendationSummary = rankableOpportunities.length
+    ? {
+        status: rankableOpportunities.some((item) => item.validation.status === 'passed')
+          ? 'validated-screening-available'
+          : 'screening-only',
+        count: rankableOpportunities.length,
+        message: rankableOpportunities.some((item) => item.validation.status === 'passed')
+          ? 'At least one category has historical outcome validation; every candidate still requires a site-level test.'
+          : 'Results are public-data planning comparisons. No category has a passing historical outcome validation record yet.',
+      }
+    : {
+        status: 'insufficient-evidence',
+        count: 0,
+        message: 'The scan does not contain enough category-level evidence to issue a ranked recommendation.',
+      }
 
   return {
     generatedAt: new Date().toISOString(),
@@ -543,6 +686,7 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
       hiesYear: statistics.hiesYear,
     },
     opportunities,
+    recommendationSummary,
     marketBreakdown,
     mapBusinesses: selectMapBusinesses(market.places, mapResponseBusinessLimit, {
       lat: location.lat,
@@ -590,7 +734,7 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
         ethnicityAvailable: Boolean(statistics.ethnicityShares),
         citizenshipAvailable: Boolean(statistics.citizenshipShares),
         religionAvailable: Boolean(statistics.religionShares),
-        note: 'Ethnicity is used only as a modest cuisine-affinity signal and never as a proxy for religion.',
+        note: 'Ethnicity is displayed as official aggregate context but is not converted into presumed customer demand or used as a proxy for religion.',
       },
       warnings: [
         ...statistics.warnings,
@@ -599,14 +743,16 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
       ],
     },
     methodology: {
-      demand: 'We estimate how many people live nearby, adjust for the category’s relevant age groups, household income and spending, then apply a cautious category capture rate',
-      spatialAllocation: 'district population × a starter radius-based spatial share; replace with small-area population grids for production',
+      modelVersion: 'launchbase-public-screening-v2',
+      demand: 'We estimate a category spending pool from radius-allocated district population, household conditions and category-specific cold-start assumptions. This is a planning proxy until Malaysian store outcomes are available.',
+      spatialAllocation: 'District population is allocated to the radius as a disclosed proxy. Mapped competitors and substitutes are then weighted by distance from the selected scan centre.',
       supportableStores: 'estimated market demand ÷ average annual store sales',
-      fairShare: 'estimated market demand ÷ (coverage-adjusted competitors + proposed store); observed supply is never assumed complete',
+      fairShare: 'estimated market demand ÷ (distance- and coverage-adjusted competitor equivalents + proposed store); observed supply is never assumed complete',
       competitorEstimate: 'nearby OpenStreetMap features classified from structured business tags, cuisine combinations and an English/Malay name dictionary, then blended with a density floor when coverage is incomplete',
-      demographicFit: 'Age groups affect only categories they can reasonably influence. Ethnicity can make a small cuisine-affinity adjustment, but it never stands in for religion. Restricted products need explicit religion or strong local-market evidence.',
+      demographicFit: 'Age groups affect only categories they can reasonably influence. Ethnicity is not converted into presumed customer demand and never stands in for religion. Restricted products need explicit religion or strong local-market evidence.',
       scoreWeights: { demandScale: 0.23, marketGap: 0.25, fairShare: 0.18, householdIncome: 0.12, competition: 0.12, evidenceQuality: 0.1 },
-      disclaimer: 'The opportunity index is a comparative planning score, not a probability of success. It is capped by evidence quality and must be validated before investment.',
+      validation: 'A category becomes historically calibrated only after a recorded passing spatial and temporal holdout test against real store outcomes.',
+      disclaimer: 'The planning score is not a probability of success. Revenue ranges include benchmark, population-allocation and mapped-supply uncertainty; the system abstains when evidence is unusable.',
     },
     sources: [
       ...statistics.sources,
@@ -616,12 +762,13 @@ export function buildAnalysis({ location, statistics, market, benchmarks, radius
 }
 
 export function buildDetailedReport(analysis) {
+  const topOpportunity = analysis.opportunities[0]
   return {
     ...analysis,
     sensitivity: [
-      { scenario: 'Conservative', demandChange: -20, topOpportunitySalesRm: Math.round(analysis.opportunities[0].fairShareSalesRm * 0.8) },
-      { scenario: 'Base', demandChange: 0, topOpportunitySalesRm: analysis.opportunities[0].fairShareSalesRm },
-      { scenario: 'Optimistic', demandChange: 20, topOpportunitySalesRm: Math.round(analysis.opportunities[0].fairShareSalesRm * 1.2) },
+      { scenario: 'Conservative', demandChange: -Math.round(topOpportunity.uncertainty.relativeUncertainty * 100), topOpportunitySalesRm: topOpportunity.fairShareRangeRm.low },
+      { scenario: 'Base', demandChange: 0, topOpportunitySalesRm: topOpportunity.fairShareSalesRm },
+      { scenario: 'Optimistic', demandChange: Math.round(topOpportunity.uncertainty.relativeUncertainty * 100), topOpportunitySalesRm: topOpportunity.fairShareRangeRm.high },
     ],
     competitorValidation: analysis.opportunities.map((opportunity) => ({
       category: opportunity.name,
@@ -633,8 +780,15 @@ export function buildDetailedReport(analysis) {
     })),
     nextSteps: [
       'Validate pedestrian and vehicle traffic for shortlisted streets.',
-      'Request commercial rental and floor-area data from a local property agent.',
-      'Run site-level capture-rate and gravity modelling before signing a lease.',
+      'Compare the estimated revenue range with current rental quotes and operating-cost estimates.',
+      'Run a paid-intent pilot or preorder test before signing a lease.',
     ],
+    validationProtocol: {
+      target: 'Monthly sales and 24-month survival from consented historical outcomes',
+      requiredHoldouts: ['future-period holdout', 'unseen-district holdout', 'strict future-and-unseen-district holdout'],
+      baselines: ['population only', 'competitor density only', 'district category average'],
+      metrics: ['MAE', 'WAPE', 'Brier score', 'probability calibration', 'prediction-interval coverage'],
+      currentStatus: analysis.recommendationSummary.status,
+    },
   }
 }
