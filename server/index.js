@@ -12,7 +12,7 @@ import { getAreaStatistics } from './services/malaysiaData.js'
 import { getNearbyBusinesses } from './services/openMarket.js'
 import { buildAnalysis, buildDetailedReport } from './services/analysis.js'
 import { singleFlight, TtlLruCache } from './services/runtimeCache.js'
-import { isContactEmailConfigured, sendContactEmail } from './services/contactEmail.js'
+import { countWords, isContactEmailConfigured, sendContactEmail } from './services/contactEmail.js'
 
 const app = express()
 const port = Number(process.env.PORT || 8787)
@@ -57,8 +57,16 @@ const contactInput = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().email().max(200),
   subject: z.string().trim().min(3).max(120),
-  message: z.string().trim().min(10).max(2000),
+  message: z.string().trim().min(1).max(2000),
   website: z.string().max(200).optional().default(''),
+}).superRefine((value, context) => {
+  if (countWords(value.message) < 5) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['message'],
+      message: 'Message must be at least 5 words.',
+    })
+  }
 })
 
 app.post('/api/contact', contactLimiter, async (request, response, next) => {
@@ -71,6 +79,15 @@ app.post('/api/contact', contactLimiter, async (request, response, next) => {
     response.set('Cache-Control', 'no-store')
     return response.status(202).json({ status: 'sent' })
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      const messageTooShort = error.issues.some((issue) => issue.path[0] === 'message' && issue.code === 'custom')
+      return response.status(400).json({
+        code: messageTooShort ? 'MESSAGE_TOO_SHORT' : 'CONTACT_FIELDS_REQUIRED',
+        error: messageTooShort
+          ? 'Message must be at least 5 words.'
+          : 'Please complete all fields correctly before sending.',
+      })
+    }
     return next(error)
   }
 })

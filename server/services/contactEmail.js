@@ -2,6 +2,11 @@ import nodemailer from 'nodemailer'
 
 const truthy = (value) => /^(1|true|yes)$/i.test(String(value || ''))
 const singleLine = (value) => String(value || '').replace(/[\r\n]+/g, ' ').trim()
+const wordPattern = /[\p{L}\p{N}]+/gu
+
+export function countWords(value) {
+  return String(value || '').match(wordPattern)?.length || 0
+}
 
 export function getContactEmailConfig(env = process.env) {
   const port = Number(env.SMTP_PORT || 465)

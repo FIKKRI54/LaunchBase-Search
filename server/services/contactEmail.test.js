@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildContactMessage,
+  countWords,
   isContactEmailConfigured,
   sendContactEmail,
 } from './contactEmail.js'
@@ -19,6 +20,12 @@ const env = {
 test('requires complete server-side SMTP configuration', () => {
   assert.equal(isContactEmailConfigured(env), true)
   assert.equal(isContactEmailConfigured({ ...env, SMTP_PASS: '' }), false)
+})
+
+test('counts words across English and Malay text without counting punctuation', () => {
+  assert.equal(countWords('Please help with my scan.'), 5)
+  assert.equal(countWords('Boleh bantu semak kawasan ini?'), 5)
+  assert.equal(countWords('....'), 0)
 })
 
 test('builds a text-only message with a safe subject and visitor reply-to', () => {

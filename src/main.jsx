@@ -1567,6 +1567,8 @@ function Metric({ label, value }) {
   return <div><p className="text-xs text-contrast/55">{label}</p><p className="mt-1 text-2xl font-semibold">{value}</p></div>
 }
 
+const countMessageWords = (value) => String(value || '').match(/[\p{L}\p{N}]+/gu)?.length || 0
+
 function ContactSection({ locale, notify }) {
   const t = translator(locale)
   const [status, setStatus] = useState('idle')
@@ -1577,22 +1579,50 @@ function ContactSection({ locale, notify }) {
     if (status === 'sending') return
     const formElement = event.currentTarget
     const form = new FormData(formElement)
+    const values = {
+      name: form.get('name')?.toString().trim() || '',
+      email: form.get('email')?.toString().trim() || '',
+      subject: form.get('subject')?.toString().trim() || '',
+      message: form.get('message')?.toString().trim() || '',
+      website: form.get('website')?.toString() || '',
+    }
+
+    if (!values.name || !values.email || !values.subject || !values.message) {
+      setStatus('error')
+      setError(t('contactRequired'))
+      return
+    }
+
+    const emailInput = formElement.elements.namedItem('email')
+    if (emailInput && !emailInput.checkValidity()) {
+      setStatus('error')
+      setError(t('contactInvalidEmail'))
+      return
+    }
+
+    if (countMessageWords(values.message) < 5) {
+      setStatus('error')
+      setError(t('contactMessageMinWords'))
+      return
+    }
+
     setStatus('sending')
     setError('')
     try {
       const response = await fetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: form.get('name')?.toString().trim(),
-          email: form.get('email')?.toString().trim(),
-          subject: form.get('subject')?.toString().trim(),
-          message: form.get('message')?.toString().trim(),
-          website: form.get('website')?.toString() || '',
-        }),
+        body: JSON.stringify(values),
       })
       const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.error || t('contactError'))
+      if (!response.ok) {
+        const validationError = payload.code === 'MESSAGE_TOO_SHORT'
+          ? t('contactMessageMinWords')
+          : payload.code === 'CONTACT_FIELDS_REQUIRED'
+            ? t('contactRequired')
+            : payload.error || t('contactError')
+        throw new Error(validationError)
+      }
       formElement.reset()
       setStatus('sent')
       notify?.(t('contactSent'))
@@ -1619,14 +1649,14 @@ function ContactSection({ locale, notify }) {
             </div>
           </div>
 
-          <form onSubmit={sendMessage} className="grid gap-5 p-8 md:grid-cols-2 md:p-12 lg:p-14">
+          <form noValidate onSubmit={sendMessage} onChange={() => { if (status === 'error') { setStatus('idle'); setError('') } }} className="grid gap-5 p-8 md:grid-cols-2 md:p-12 lg:p-14">
             <label className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden" aria-hidden="true">
               Website
               <input name="website" type="text" tabIndex={-1} autoComplete="off" />
             </label>
             <label className="block text-sm font-medium">
               {t('contactName')}
-              <input name="name" required maxLength={80} autoComplete="name" className="form-input mt-2" placeholder={t('contactNamePlaceholder')} />
+              <input name="name" required minLength={2} maxLength={80} autoComplete="name" className="form-input mt-2" placeholder={t('contactNamePlaceholder')} />
             </label>
             <label className="block text-sm font-medium">
               {t('email')}
@@ -1634,11 +1664,12 @@ function ContactSection({ locale, notify }) {
             </label>
             <label className="block text-sm font-medium md:col-span-2">
               {t('contactSubject')}
-              <input name="subject" required maxLength={120} className="form-input mt-2" placeholder={t('contactSubjectPlaceholder')} />
+              <input name="subject" required minLength={3} maxLength={120} className="form-input mt-2" placeholder={t('contactSubjectPlaceholder')} />
             </label>
             <label className="block text-sm font-medium md:col-span-2">
               {t('contactMessage')}
-              <textarea name="message" required maxLength={2000} rows={6} className="form-input mt-2 min-h-36 resize-y py-3 leading-6" placeholder={t('contactMessagePlaceholder')} />
+              <textarea name="message" required minLength={1} maxLength={2000} rows={6} aria-describedby="contact-message-hint" className="form-input mt-2 min-h-36 resize-y py-3 leading-6" placeholder={t('contactMessagePlaceholder')} />
+              <span id="contact-message-hint" className="mt-1 block text-xs font-normal text-foreground/50">{t('contactMessageHint')}</span>
             </label>
             <div className="flex flex-col gap-4 md:col-span-2 md:flex-row md:items-center md:justify-between">
               <p className="max-w-sm text-xs leading-5 text-foreground/50">{t('contactMailNote')}</p>
