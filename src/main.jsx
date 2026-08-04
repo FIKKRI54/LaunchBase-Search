@@ -22,7 +22,7 @@ const Icon = ({ icon, width = 20, className = '' }) =>
   React.createElement('iconify-icon', { icon, width, class: className })
 
 const HEADER_LOGO_SEEN_KEY = 'launchbase-header-logo-seen-session-v6'
-const CONTACT_EMAIL = import.meta.env.VITE_CONTACT_EMAIL?.trim() || 'hello@launchbase.my'
+const CONTACT_EMAIL = import.meta.env.VITE_CONTACT_EMAIL?.trim() || 'hello@laubase.xyz'
 
 function AnimatedHeaderLogo() {
   const reducedMotion = useRef(window.matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -1569,20 +1569,37 @@ function Metric({ label, value }) {
 
 function ContactSection({ locale, notify }) {
   const t = translator(locale)
+  const [status, setStatus] = useState('idle')
+  const [error, setError] = useState('')
 
-  const openEmail = (event) => {
+  const sendMessage = async (event) => {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const subject = form.get('subject')?.toString().trim()
-    const body = [
-      `${t('contactName')}: ${form.get('name')}`,
-      `${t('email')}: ${form.get('email')}`,
-      '',
-      form.get('message'),
-    ].join('\n')
-
-    window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(`[LaunchBase Search] ${subject}`)}&body=${encodeURIComponent(body)}`
-    notify?.(t('contactOpening'))
+    if (status === 'sending') return
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    setStatus('sending')
+    setError('')
+    try {
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.get('name')?.toString().trim(),
+          email: form.get('email')?.toString().trim(),
+          subject: form.get('subject')?.toString().trim(),
+          message: form.get('message')?.toString().trim(),
+          website: form.get('website')?.toString() || '',
+        }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || t('contactError'))
+      formElement.reset()
+      setStatus('sent')
+      notify?.(t('contactSent'))
+    } catch (sendError) {
+      setStatus('error')
+      setError(sendError.message || t('contactError'))
+    }
   }
 
   return (
@@ -1595,14 +1612,18 @@ function ContactSection({ locale, notify }) {
               <p className="eyebrow">{t('contactEyebrow')}</p>
               <h2 className="mt-5 max-w-md text-4xl font-semibold leading-[1.06] tracking-[-.05em] md:text-5xl">{t('contactTitle')}</h2>
               <p className="mt-6 max-w-md text-base leading-7 text-foreground/65">{t('contactCopy')}</p>
-              <a href={`mailto:${CONTACT_EMAIL}`} className="mt-9 inline-flex items-center gap-3 rounded-2xl border border-foreground/10 bg-bg px-4 py-3 text-sm font-medium transition hover:border-accent/50 hover:text-accent">
+              <div className="mt-9 inline-flex items-center gap-3 rounded-2xl border border-foreground/10 bg-bg px-4 py-3 text-sm font-medium">
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent/10 text-accent"><Icon icon="solar:letter-linear" width={20} /></span>
                 {CONTACT_EMAIL}
-              </a>
+              </div>
             </div>
           </div>
 
-          <form onSubmit={openEmail} className="grid gap-5 p-8 md:grid-cols-2 md:p-12 lg:p-14">
+          <form onSubmit={sendMessage} className="grid gap-5 p-8 md:grid-cols-2 md:p-12 lg:p-14">
+            <label className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden" aria-hidden="true">
+              Website
+              <input name="website" type="text" tabIndex={-1} autoComplete="off" />
+            </label>
             <label className="block text-sm font-medium">
               {t('contactName')}
               <input name="name" required maxLength={80} autoComplete="name" className="form-input mt-2" placeholder={t('contactNamePlaceholder')} />
@@ -1621,10 +1642,12 @@ function ContactSection({ locale, notify }) {
             </label>
             <div className="flex flex-col gap-4 md:col-span-2 md:flex-row md:items-center md:justify-between">
               <p className="max-w-sm text-xs leading-5 text-foreground/50">{t('contactMailNote')}</p>
-              <button type="submit" className="button-primary shrink-0">
-                {t('contactSend')} <Icon icon="solar:plain-2-linear" width={18} />
+              <button type="submit" disabled={status === 'sending'} className="button-primary shrink-0 disabled:cursor-wait disabled:opacity-60">
+                {status === 'sending' ? t('contactSending') : t('contactSend')} <Icon icon={status === 'sending' ? 'solar:refresh-linear' : 'solar:plain-2-linear'} width={18} className={status === 'sending' ? 'animate-spin' : ''} />
               </button>
             </div>
+            {status === 'sent' && <p role="status" className="md:col-span-2 text-sm font-medium text-emerald-600">{t('contactSent')}</p>}
+            {status === 'error' && <p role="alert" className="md:col-span-2 text-sm font-medium text-red-500">{error || t('contactError')}</p>}
           </form>
         </div>
       </div>
@@ -1640,7 +1663,7 @@ function Footer({ locale }) {
         <div><a href="#" className="flex items-center gap-2.5 font-semibold"><img src={launchbaseLogo} alt="" className="h-10 w-10 shrink-0 object-contain" />LaunchBase Search</a><p className="mt-5 max-w-sm text-sm leading-6 text-foreground/65">{t('footerCopy')}</p></div>
         <div className="grid grid-cols-2 gap-8 text-sm md:justify-self-end md:text-right">
           <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('product')}</p><a className="block hover:text-accent" href="#how">{t('navHow')}</a><a className="block hover:text-accent" href="#contact">{t('contact')}</a></div>
-          <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('company')}</p><a className="block hover:text-accent" href="#">{t('privacy')}</a><a className="block hover:text-accent" href="#">{t('terms')}</a><a className="block hover:text-accent" href={`mailto:${CONTACT_EMAIL}`}>{t('contact')}</a></div>
+          <div className="space-y-3 text-foreground/65"><p className="mb-4 text-foreground">{t('company')}</p><a className="block hover:text-accent" href="#">{t('privacy')}</a><a className="block hover:text-accent" href="#">{t('terms')}</a><a className="block hover:text-accent" href="#contact">{t('contact')}</a></div>
         </div>
       </div>
       <div className="mx-auto flex max-w-[1240px] flex-col gap-2 border-t border-foreground/10 px-5 py-6 text-xs text-foreground/60 sm:flex-row sm:justify-between lg:px-8"><p>{t('footerCopyright')}</p><p>{t('builtFor')}</p></div>

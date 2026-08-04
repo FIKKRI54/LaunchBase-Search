@@ -51,6 +51,8 @@ Without a Google key, the complete interactive analysis remains usable. Users ca
 
 The PDF download is generated on demand in the browser and is never uploaded to or stored by the API. Every scan is ephemeral and is not retained by the application.
 
+The contact form posts to the Node.js API and sends a text-only message through server-side SMTP; messages are not stored in PostgreSQL. Configure `CONTACT_TO_EMAIL`, `CONTACT_FROM_EMAIL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, and `SMTP_PASS`. For Gmail, enable MFA and use a Google App Password rather than the normal account password. Set `CONTACT_TO_EMAIL` to the real destination inbox to avoid routing an application-generated message back through the same Gmail account. Cloudflare Email Routing continues to forward messages that people send directly to the public `hello@laubase.xyz` address, but does not provide outgoing SMTP.
+
 Location searches and map clicks are resolved through Nominatim and matched to the corresponding DOSM administrative district. Nearby businesses are queried from Overpass, categorized from OSM tags and multilingual name evidence, deduplicated by storefront name and proximity, and cached in PostgreSQL. Set `OSM_USER_AGENT` to an identifier containing your contact information before deployment.
 
 Public OpenStreetMap tiles and Nominatim are suitable for normal interactive starter use, but production traffic must follow their usage policies or use a self-hosted/contracted provider. The app does not implement forbidden client-side autocomplete or tile prefetching.

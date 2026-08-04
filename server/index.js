@@ -12,6 +12,7 @@ import { getAreaStatistics } from './services/malaysiaData.js'
 import { getNearbyBusinesses } from './services/openMarket.js'
 import { buildAnalysis, buildDetailedReport } from './services/analysis.js'
 import { singleFlight, TtlLruCache } from './services/runtimeCache.js'
+import { isContactEmailConfigured, sendContactEmail } from './services/contactEmail.js'
 
 const app = express()
 const port = Number(process.env.PORT || 8787)
@@ -31,6 +32,13 @@ const analysisLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many market scans from this connection. Please wait before trying again.' },
 })
+const contactLimiter = rateLimit({
+  windowMs: Math.max(60_000, Number(process.env.CONTACT_RATE_WINDOW_MS || 900_000)),
+  limit: Math.max(1, Number(process.env.CONTACT_RATE_LIMIT || 5)),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many contact messages from this connection. Please try again later.' },
+})
 
 app.get('/api/health', async (_request, response) => {
   const databaseResult = await database.tryQuery('SELECT NOW() AS now')
@@ -41,7 +49,30 @@ app.get('/api/health', async (_request, response) => {
     googleMaps: process.env.VITE_GOOGLE_MAPS_EMBED_API_KEY ? 'embed-configured' : 'embed-key-required',
     openMarketData: 'openstreetmap-with-postgres-cache',
     outcomeCalibration: process.env.OUTCOME_INGEST_TOKEN ? 'private-ingest-configured' : 'not-configured',
+    contactEmail: isContactEmailConfigured() ? 'smtp-configured' : 'not-configured',
   })
+})
+
+const contactInput = z.object({
+  name: z.string().trim().min(2).max(80),
+  email: z.string().trim().email().max(200),
+  subject: z.string().trim().min(3).max(120),
+  message: z.string().trim().min(10).max(2000),
+  website: z.string().max(200).optional().default(''),
+})
+
+app.post('/api/contact', contactLimiter, async (request, response, next) => {
+  try {
+    const input = contactInput.parse(request.body)
+    // Bots commonly fill fields hidden from people. Return the same response so
+    // the field cannot be used to probe the spam protection.
+    if (input.website) return response.status(202).json({ status: 'sent' })
+    await sendContactEmail(input)
+    response.set('Cache-Control', 'no-store')
+    return response.status(202).json({ status: 'sent' })
+  } catch (error) {
+    return next(error)
+  }
 })
 
 const businessOutcomeInput = z.object({
