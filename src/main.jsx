@@ -21,7 +21,6 @@ import './styles.css'
 const Icon = ({ icon, width = 20, className = '' }) =>
   React.createElement('iconify-icon', { icon, width, class: className })
 
-const HEADER_LOGO_SEEN_KEY = 'launchbase-header-logo-seen-session-v6'
 const CONTACT_EMAIL = import.meta.env.VITE_CONTACT_EMAIL?.trim() || 'hello@laubase.xyz'
 
 function AnimatedHeaderLogo() {
@@ -31,15 +30,13 @@ function AnimatedHeaderLogo() {
   const [videoReady, setVideoReady] = useState(false)
   const [videoEnded, setVideoEnded] = useState(false)
   const [hdLogoReady, setHdLogoReady] = useState(false)
-  const [animate] = useState(() => {
-    if (reducedMotion.current) return false
-    try {
-      const forceReplay = new URLSearchParams(window.location.search).get('logo') === 'replay'
-      return forceReplay || sessionStorage.getItem(HEADER_LOGO_SEEN_KEY) !== '1'
-    } catch {
-      return true
-    }
-  })
+  const animate = !reducedMotion.current
+
+  const revealFirstFrame = (video) => {
+    video.pause()
+    video.currentTime = 0
+    setVideoReady(true)
+  }
 
   const startFromFirstFrame = (video) => {
     if (playbackStarted.current) return
@@ -53,11 +50,6 @@ function AnimatedHeaderLogo() {
 
   const finishPlayback = () => {
     setVideoEnded(true)
-    try {
-      sessionStorage.setItem(HEADER_LOGO_SEEN_KEY, '1')
-    } catch {
-      // A completed animation does not depend on storage being available.
-    }
   }
 
   if (!animate || fallback) {
@@ -94,7 +86,7 @@ function AnimatedHeaderLogo() {
         preload="auto"
         disablePictureInPicture
         aria-hidden="true"
-        onPlaying={() => setVideoReady(true)}
+        onLoadedData={(event) => revealFirstFrame(event.currentTarget)}
         onEnded={finishPlayback}
         onError={() => setFallback(true)}
         onCanPlay={(event) => startFromFirstFrame(event.currentTarget)}
