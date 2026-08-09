@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import launchbaseLogo from './assets/launchbase-logo-rocket.png'
-import launchbaseHeaderVideo from './assets/launchbase-header-logo.webm'
-import launchbaseHeaderHdLogo from './assets/launchbase-header-logo-hd-clean.png'
+import launchbaseHeaderVideo from './assets/launchbase-header-logo-optimized.webm'
+import launchbaseHeaderHdLogo from './assets/launchbase-header-logo-hd-optimized.png'
 import {
   businessTypeLabel,
   localizedMethodology,
@@ -41,26 +41,23 @@ function AnimatedHeaderLogo() {
     }
   })
 
-  useEffect(() => {
-    if (!animate) return
-    try {
-      sessionStorage.setItem(HEADER_LOGO_SEEN_KEY, '1')
-    } catch {
-      // The animated logo still works when storage is unavailable.
-    }
-  }, [animate])
-
   const startFromFirstFrame = (video) => {
     if (playbackStarted.current) return
     playbackStarted.current = true
     video.pause()
     video.currentTime = 0
-    setVideoReady(true)
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        video.play().catch(() => setFallback(true))
-      })
+      video.play().catch(() => setFallback(true))
     })
+  }
+
+  const finishPlayback = () => {
+    setVideoEnded(true)
+    try {
+      sessionStorage.setItem(HEADER_LOGO_SEEN_KEY, '1')
+    } catch {
+      // A completed animation does not depend on storage being available.
+    }
   }
 
   if (!animate || fallback) {
@@ -79,7 +76,7 @@ function AnimatedHeaderLogo() {
   }
 
   return (
-    <span className={`brand-logo-stage ${videoEnded && hdLogoReady ? 'brand-logo-stage-finished' : ''}`}>
+    <span className={`brand-logo-stage ${videoReady ? 'brand-logo-stage-playing' : ''} ${videoEnded && hdLogoReady ? 'brand-logo-stage-finished' : ''}`}>
       <img
         src={launchbaseHeaderHdLogo}
         alt=""
@@ -95,10 +92,12 @@ function AnimatedHeaderLogo() {
         muted
         playsInline
         preload="auto"
+        disablePictureInPicture
         aria-hidden="true"
-        onEnded={() => setVideoEnded(true)}
+        onPlaying={() => setVideoReady(true)}
+        onEnded={finishPlayback}
         onError={() => setFallback(true)}
-        onLoadedData={(event) => startFromFirstFrame(event.currentTarget)}
+        onCanPlay={(event) => startFromFirstFrame(event.currentTarget)}
       />
     </span>
   )

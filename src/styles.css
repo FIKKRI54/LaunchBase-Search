@@ -234,7 +234,7 @@ html[data-theme="light"] .brand-logo-video {
 
 .brand-logo-image {
   object-fit: contain;
-  opacity: 0;
+  opacity: 1;
   transition: transform .2s ease, opacity .24s cubic-bezier(.22, 1, .36, 1);
 }
 .brand-logo-video {
@@ -242,6 +242,8 @@ html[data-theme="light"] .brand-logo-video {
   opacity: 0;
   transition: transform .2s ease, opacity .22s cubic-bezier(.22, 1, .36, 1);
 }
+.brand-logo-stage-playing .brand-logo-resting { opacity: 0; }
+.brand-logo-stage-playing .brand-logo-video,
 .brand-logo-video-ready { opacity: 1; }
 .brand-logo-stage-finished .brand-logo-resting { opacity: 1; }
 .brand-logo-stage-finished .brand-logo-video { opacity: 0; }
