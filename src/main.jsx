@@ -21,6 +21,20 @@ import './styles.css'
 const Icon = ({ icon, width = 20, className = '' }) =>
   React.createElement('iconify-icon', { icon, width, class: className })
 
+function ClearSearchButton({ label, onClear }) {
+  return (
+    <button
+      type="button"
+      onClick={onClear}
+      className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+      aria-label={label}
+      title={label}
+    >
+      <Icon icon="solar:close-circle-linear" width={20} />
+    </button>
+  )
+}
+
 const CONTACT_EMAIL = import.meta.env.VITE_CONTACT_EMAIL?.trim() || 'hello@laubase.xyz'
 
 function AnimatedHeaderLogo() {
@@ -279,10 +293,16 @@ function Header({ theme, toggleTheme, locale, toggleLocale }) {
 
 function Hero({ onSearch, theme, locale }) {
   const [location, setLocation] = useState('Kuala Lumpur City Centre')
+  const locationInputRef = useRef(null)
   const t = translator(locale)
   const submit = (event) => {
     event.preventDefault()
     if (location.trim()) onSearch(location.trim())
+  }
+
+  const clearLocation = () => {
+    setLocation('')
+    locationInputRef.current?.focus()
   }
 
   return (
@@ -300,10 +320,11 @@ function Hero({ onSearch, theme, locale }) {
             {t('heroCopy')}
           </p>
           <form onSubmit={submit} className="mt-9 flex max-w-[650px] flex-col gap-2 rounded-2xl border border-foreground/15 bg-ink/70 p-2 shadow-2xl shadow-black/20 backdrop-blur-xl sm:flex-row">
-            <label className="flex min-w-0 flex-1 items-center gap-3 px-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3 px-3">
               <Icon icon="solar:magnifer-linear" width={22} className="text-foreground/60" />
-              <input value={location} onChange={(event) => setLocation(event.target.value)} className="h-12 w-full bg-transparent text-sm text-foreground outline-none placeholder:text-foreground/60" placeholder={t('heroPlaceholder')} />
-            </label>
+              <input ref={locationInputRef} value={location} onChange={(event) => setLocation(event.target.value)} className="h-12 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-foreground/60" aria-label={t('heroPlaceholder')} placeholder={t('heroPlaceholder')} />
+              {location && <ClearSearchButton label={t('clearSearch')} onClear={clearLocation} />}
+            </div>
             <button className="button-primary group h-12 px-6">
               {t('explore')} <Icon icon="solar:arrow-right-linear" width={18} className="transition group-hover:translate-x-1" />
             </button>
@@ -675,6 +696,7 @@ class MapErrorBoundary extends React.Component {
 
 function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
   const t = translator(locale)
+  const searchInputRef = useRef(null)
   const [mode, setMode] = useState('market')
   const [googleView, setGoogleView] = useState(() => ({ analysis, mode: 'google', ready: false }))
   const [searchQuery, setSearchQuery] = useState(analysis.location.formattedAddress || analysis.location.name)
@@ -712,6 +734,12 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
     }
   }
 
+  const clearSearch = () => {
+    setSearchQuery('')
+    setDraftPoint(null)
+    searchInputRef.current?.focus()
+  }
+
   const selectMode = (nextMode) => {
     setMode(nextMode)
   }
@@ -733,9 +761,10 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
         ))}
       </div>
       <form onSubmit={submitSearch} className="relative z-30 grid gap-2 border-b border-foreground/10 bg-surface p-3 sm:grid-cols-[1fr_auto_auto]">
-        <label className="flex min-w-0 items-center gap-2 rounded-xl border border-foreground/10 bg-ink px-3 focus-within:border-accent">
+        <div className="flex min-w-0 items-center gap-2 rounded-xl border border-foreground/10 bg-ink px-3 focus-within:border-accent">
           <Icon icon="solar:magnifer-linear" width={17} className="text-foreground/50" />
           <input
+            ref={searchInputRef}
             value={searchQuery}
             onChange={(event) => {
               setSearchQuery(event.target.value)
@@ -745,7 +774,8 @@ function InteractiveAnalysisMap({ analysis, onScan, loading, locale }) {
             aria-label="Search another Malaysian location"
             placeholder={t('searchPlace')}
           />
-        </label>
+          {searchQuery && <ClearSearchButton label={t('clearSearch')} onClear={clearSearch} />}
+        </div>
         <div className="flex items-center gap-2 rounded-xl border border-foreground/10 bg-ink px-3 text-xs text-foreground/60">
           <span>{t('scanRadius')}</span>
           <ThemeSelect
